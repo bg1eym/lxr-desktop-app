@@ -22,6 +22,7 @@ extern emu_panel_t emu_panel;
 #define EMU_LCD_ROWS 2
 const char *emu_lcd_text(void);              /* 32 chars, row-major, no NUL inside */
 const uint8_t *emu_lcd_cgram(void);          /* 8 custom chars x 8 rows */
+uint32_t emu_lcd_state(void);                /* see lcd_emu.c */
 
 void emu_rng_seed(uint32_t seed);
 void emu_time_set_ms(uint32_t ms);

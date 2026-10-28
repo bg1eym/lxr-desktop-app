@@ -32,6 +32,7 @@
 #include "Soundengine/Soundengine.h"
 #include "Soundengine/globals.h"
 #include "Soundengine/cs4344_cs5343.h"
+#include "Soundengine/AudioCodecManager.h"
 #include "Soundengine/DSPAudio/random.h"
 #include "Soundengine/USB/usb_manager.h"
 #include "Soundengine/MIDI/Uart.h"
@@ -83,11 +84,24 @@ void emu_fatal(const char *msg)
 	abort();
 }
 
-/* cs4344_cs5343.c is not built: the DMA is modelled in emu_render_block(). */
-void codec_initCsCodec(uint32_t Addr1, uint32_t Size1, uint32_t Addr2, uint32_t Size2)
+/* ---- audio codec ------------------------------------------------------------
+ * Replaces AudioCodecManager.c and cs4344_cs5343.c: same DMA double buffers
+ * and sample flag, the DMA itself is modelled in emu_render_block().
+ * CodecInit() takes the sample rate here: Soundengine.c calls it with one
+ * argument while AudioCodecManager.c defines it without parameters, which
+ * WebAssembly cannot call. */
+int16_t dma_buffer[OUTPUT_DMA_SIZE * 4];
+int16_t dma_buffer2[OUTPUT_DMA_SIZE * 4];
+volatile uint8_t bCurrentSampleValid = 0;
+
+int CodecInit(uint32_t fs)
 {
-	(void)Addr1; (void)Size1; (void)Addr2; (void)Size2;
+	(void)fs;
+	dma_buffer[0] = 32756;   /* as in AudioCodecManager.c */
+	return 0;
 }
+
+static void encoder_hw_tick(void);
 
 /* ---- interrupt handlers --------------------------------------------------- */
 static void tim14_irq(void)        /* TIM8_TRG_COM_TIM14_IRQHandler */
@@ -103,6 +117,7 @@ static void systick_irq(void)      /* SysTick_Handler */
 {
 	emu_time_set_ms(++emu_ms_count);
 	screensaver_timer++;
+	encoder_hw_tick();
 	encoder_callback();
 }
 
@@ -155,13 +170,105 @@ void emu_set_jacks(uint8_t mask)
 	if (mask & 8) switch_r2_GPIO_Port->IDR |= switch_r2_Pin; else switch_r2_GPIO_Port->IDR &= ~(uint32_t)switch_r2_Pin;
 }
 
+/* ---- main encoder -----------------------------------------------------------
+ * A/B are sampled by encoder_callback() every millisecond. One detent is a
+ * full quadrature cycle (4 transitions) from the rest state 11; the pins get
+ * one transition per SysTick. The switch is debounced over 4 samples 10 ms
+ * apart, so every level is held for at least ENC_BTN_HOLD_MS. */
+#define ENC_BTN_HOLD_MS 60
+static int32_t enc_pending;            /* quarter steps still to send, sign = direction */
+static uint8_t enc_state = 3;          /* A<<1 | B on the pins */
+static uint8_t enc_btn_target;         /* 1 = pressed */
+static uint32_t enc_btn_changed_ms;
+
+static void enc_set_pins(uint8_t st)
+{
+	enc_state = st;
+	if (st & 2) Enc_A_GPIO_Port->IDR |= Enc_A_Pin; else Enc_A_GPIO_Port->IDR &= ~(uint32_t)Enc_A_Pin;
+	if (st & 1) Enc_B_GPIO_Port->IDR |= Enc_B_Pin; else Enc_B_GPIO_Port->IDR &= ~(uint32_t)Enc_B_Pin;
+}
+
+void emu_encoder_turn(int detents)
+{
+	enc_pending += detents * 4;
+}
+
+void emu_encoder_button(uint8_t down)
+{
+	enc_btn_target = down ? 1 : 0;
+}
+
+static void encoder_hw_tick(void)
+{
+	/* forward: 00 -> 01 -> 11 -> 10 -> 00 */
+	static const uint8_t fwd[4] = { 1, 3, 0, 2 };
+	static const uint8_t back[4] = { 2, 0, 3, 1 };
+	if (enc_pending > 0) { enc_set_pins(fwd[enc_state]); enc_pending--; }
+	else if (enc_pending < 0) { enc_set_pins(back[enc_state]); enc_pending++; }
+
+	const uint8_t pressed = (Enc_Switch_GPIO_Port->IDR & Enc_Switch_Pin) == 0;
+	if (pressed != enc_btn_target && emu_ms_count - enc_btn_changed_ms >= ENC_BTN_HOLD_MS) {
+		if (enc_btn_target) Enc_Switch_GPIO_Port->IDR &= ~(uint32_t)Enc_Switch_Pin;
+		else Enc_Switch_GPIO_Port->IDR |= Enc_Switch_Pin;
+		enc_btn_changed_ms = emu_ms_count;
+	}
+}
+
+/* ---- endless pots -----------------------------------------------------------
+ * Each pot has two wipers on ADC channels 2i and 2i+1. calcPosition() in
+ * IO/adcPots.c takes the angle from wiper b and uses wiper a only to tell the
+ * two half turns apart (a above mid-scale: 0..180 degrees). adc_checkPots()
+ * only looks at a pot whose wiper a moved by more than its hysteresis, so a
+ * is alternated between two values in the right half on every move. The pot
+ * turns in steps of POT_STEP_DEG, one step per main loop pass; a value
+ * parameter moves by one per step, menu-type parameters need 8 steps, as on
+ * the device. */
+#define POT_STEP_DEG 2
+static int32_t pot_pending[4];         /* in POT_STEP_DEG steps */
+static int32_t pot_angle[4];           /* degrees, 0..359 */
+static uint8_t pot_flip[4];
+
+static void pot_write_adc(int i)
+{
+	const float deg = pot_angle[i] + 0.5f;  /* stay clear of truncation edges */
+	uint16_t a, b;
+	if (deg < 180.f) {
+		a = pot_flip[i] ? 0xC00 : 0xE00;
+		b = (uint16_t)(deg / 180.f * 4095.f + 0.5f);
+	} else {
+		a = pot_flip[i] ? 0x200 : 0x400;
+		b = (uint16_t)((360.f - deg) / 180.f * 4095.f + 0.5f);
+	}
+	adc_buf[2 * i] = (uint16_t)(a << 4);
+	adc_buf[2 * i + 1] = (uint16_t)(b << 4);
+}
+
+void emu_pot_turn(uint8_t idx, int degrees)
+{
+	if (idx < 4) pot_pending[idx] += degrees / POT_STEP_DEG;
+}
+
+static void pots_hw_tick(void)
+{
+	for (int i = 0; i < 4; i++) {
+		if (!pot_pending[i]) continue;
+		const int dir = pot_pending[i] > 0 ? 1 : -1;
+		pot_pending[i] -= dir;
+		pot_angle[i] = (pot_angle[i] + dir * POT_STEP_DEG + 360) % 360;
+		pot_flip[i] ^= 1;
+		pot_write_adc(i);
+	}
+}
+
 static void reset_inputs(void)
 {
 	memset(emu_gpio, 0, sizeof(emu_gpio));
 	memset(&emu_panel, 0, sizeof(emu_panel));
 	/* Encoder A/B and switch idle high (pulled up, switch released). */
-	Enc_A_GPIO_Port->IDR |= Enc_A_Pin;
-	Enc_B_GPIO_Port->IDR |= Enc_B_Pin;
+	enc_pending = 0;
+	enc_btn_target = 0;
+	enc_btn_changed_ms = 0;
+	enc_set_pins(3);
 	Enc_Switch_GPIO_Port->IDR |= Enc_Switch_Pin;
 	/* Card inserted. */
 	SD_CD_GPIO_Port->IDR |= SD_CD_Pin;
@@ -170,7 +277,13 @@ static void reset_inputs(void)
 	 * (8..13). Pots rest mid-scale, faders start fully up. */
 	memset(adc_buf, 0, sizeof(adc_buf));
 	memset(adc_buf_old, 0, sizeof(adc_buf_old));
-	for (int i = 0; i < 8; i++) adc_buf[i] = adc_buf_old[i] = 0x8000;
+	for (int i = 0; i < 4; i++) {
+		pot_pending[i] = 0;
+		pot_angle[i] = 90;
+		pot_flip[i] = 0;
+		pot_write_adc(i);
+	}
+	memcpy(adc_buf_old, adc_buf, 8 * sizeof(uint16_t));
 	for (int i = 0; i < 6; i++) emu_set_fader((uint8_t)i, 1.f);
 }
 
@@ -335,6 +448,7 @@ void emu_main_loop_iteration(void)
 	}
 	lastSdState = BSP_SD_IsDetected();
 
+	pots_hw_tick();
 	adc_checkPots();
 	soundengine_process();
 	buttonHandler_tick();
@@ -397,6 +511,16 @@ void emu_render_block(int16_t *out1, int16_t *out2)
 	memcpy(out2, src2, OUTPUT_DMA_SIZE * 2 * sizeof(int16_t));
 	dma_half ^= 1;
 	samples_rendered += OUTPUT_DMA_SIZE;
+}
+
+/* LED bits as sent to the 74HC595 chain, bit n = LED n (enum in
+ * ledHandler.h), plus LED_PAGE_DOWN (bit 40) on its own GPIO pin. */
+uint64_t emu_leds(void)
+{
+	uint64_t v = 0;
+	for (int i = 0; i < 5; i++) v |= (uint64_t)emu_panel.leds[i] << (8 * i);
+	if (LED_43_GPIO_Port->ODR & LED_43_Pin) v |= 1ull << 40;
+	return v;
 }
 
 uint64_t emu_samples_rendered(void) { return samples_rendered; }

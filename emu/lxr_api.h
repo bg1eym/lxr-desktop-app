@@ -27,9 +27,17 @@ void lxr_idle_blocks(int blocks);
 void lxr_button(uint8_t button, uint8_t down);
 void lxr_button_click(uint8_t button);
 int lxr_input_pending(void);
-const char *lxr_get_lcd(void);
-const uint8_t *lxr_get_leds(void);
+const char *lxr_get_lcd(void);               /* 32 chars: row 1, row 2 */
+const uint8_t *lxr_get_lcd_cgram(void);       /* 8 custom chars x 8 rows */
+uint32_t lxr_get_lcd_state(void);             /* display/cursor flags, cursor cell */
+uint32_t lxr_get_leds_lo(void);
+uint32_t lxr_get_leds_hi(void);
 void lxr_set_jacks(uint8_t mask);
+void lxr_encoder_turn(int detents);
+void lxr_encoder_button(uint8_t down);
+void lxr_pot_turn(uint8_t idx, int degrees);
+void lxr_set_fader(uint8_t idx, float pos);
+float *lxr_audio_buffer(void);
 
 int lxr_is_running(void);
 void lxr_set_running(uint8_t run);
@@ -44,6 +52,7 @@ int lxr_get_main_step(uint8_t pattern, uint8_t voice, uint8_t step);
 
 typedef void (*lxr_midi_out_fn)(uint8_t byte, void *user);
 void lxr_midi_in(const uint8_t *bytes, int len);
+void lxr_midi_in_byte(uint8_t b);
 void lxr_set_midi_out(lxr_midi_out_fn fn, void *user);
 
 #ifdef __cplusplus

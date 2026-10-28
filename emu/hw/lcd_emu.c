@@ -21,6 +21,7 @@ static uint8_t cgram[64];
 static uint8_t addr;           /* address counter */
 static uint8_t addr_is_cg;     /* last address command was SET_CGADR */
 static uint8_t entry_increase = 1;
+static uint8_t display_on, cursor_on, blink_on;
 static char text[EMU_LCD_COLS * EMU_LCD_ROWS + 1];
 
 static void hd44780_command(uint8_t c)
@@ -33,7 +34,10 @@ static void hd44780_command(uint8_t c)
 		addr_is_cg = 1;
 	} else if (c & 0x20) {          /* function set */
 	} else if (c & 0x10) {          /* cursor/display shift: not used by the firmware */
-	} else if (c & 0x08) {          /* display on/off */
+	} else if (c & 0x08) {          /* display on/off, cursor, blink */
+		display_on = (c & 0x04) != 0;
+		cursor_on = (c & 0x02) != 0;
+		blink_on = (c & 0x01) != 0;
 	} else if (c & 0x04) {          /* entry mode */
 		entry_increase = (c & 0x02) != 0;
 	} else if (c & 0x02) {          /* home */
@@ -71,6 +75,18 @@ const char *emu_lcd_text(void)
 const uint8_t *emu_lcd_cgram(void)
 {
 	return cgram;
+}
+
+/* bit 0: display on, bit 1: cursor shown, bit 2: blinking; bits 8..: cursor
+ * cell 0..31 (row-major), 0xFF when the address is off screen. */
+uint32_t emu_lcd_state(void)
+{
+	uint32_t cell = 0xFF;
+	if (!addr_is_cg) {
+		if (addr < EMU_LCD_COLS) cell = addr;
+		else if (addr >= 0x40 && addr < 0x40 + EMU_LCD_COLS) cell = EMU_LCD_COLS + addr - 0x40;
+	}
+	return (uint32_t)display_on | (uint32_t)cursor_on << 1 | (uint32_t)blink_on << 2 | cell << 8;
 }
 
 /* ---- lcd.h API ----------------------------------------------------------- */

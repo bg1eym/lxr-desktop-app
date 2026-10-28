@@ -24,9 +24,8 @@
 #include "platform.h"
 #include "lxr_api.h"
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten/emscripten.h>
-#define API EMSCRIPTEN_KEEPALIVE
+#ifdef __wasm__
+#define API __attribute__((visibility("default"), used))
 #else
 #define API
 #endif
@@ -76,6 +75,11 @@ API int lxr_init(uint32_t seed, uint32_t sd_megabytes)
 	emu_boot_opts o = { .seed = seed, .jacks = 0, .format_blank_card = 1 };
 	return emu_boot(&o);
 }
+
+/* Scratch buffer for callers that cannot pass their own memory (JS): up to
+ * 512 frames x 4 channels. */
+static float audio_buf[512 * 4];
+API float *lxr_audio_buffer(void) { return audio_buf; }
 
 API int lxr_render(float *out, int frames, int channels)
 {
@@ -135,8 +139,19 @@ API void lxr_button_click(uint8_t button)
 API int lxr_input_pending(void) { return (int)(inq_wr - inq_rd); }
 
 API const char *lxr_get_lcd(void) { return emu_lcd_text(); }
-API const uint8_t *lxr_get_leds(void) { return emu_panel.leds; }
+API const uint8_t *lxr_get_lcd_cgram(void) { return emu_lcd_cgram(); }
+API uint32_t lxr_get_lcd_state(void) { return emu_lcd_state(); }
+/* LEDs 0..31 and 32..40 (LED_PAGE_DOWN), numbered like enum in ledHandler.h. */
+API uint32_t lxr_get_leds_lo(void) { return (uint32_t)emu_leds(); }
+API uint32_t lxr_get_leds_hi(void) { return (uint32_t)(emu_leds() >> 32); }
 API void lxr_set_jacks(uint8_t mask) { emu_set_jacks(mask); }
+
+API void lxr_encoder_turn(int detents) { emu_encoder_turn(detents); }
+API void lxr_encoder_button(uint8_t down) { emu_encoder_button(down); }
+/* Turn pot 0..3 by some degrees; 2 degrees move a value parameter by one. */
+API void lxr_pot_turn(uint8_t idx, int degrees) { emu_pot_turn(idx, degrees); }
+/* Volume fader 0..5 (Drum 1-3, Snare/Clap, Cymbal, Hihat), 0..1. */
+API void lxr_set_fader(uint8_t idx, float pos) { emu_set_fader(idx, pos); }
 
 /* ---- transport ------------------------------------------------------------ */
 API int lxr_is_running(void) { return seq_isRunning(); }
@@ -204,6 +219,8 @@ API int lxr_get_main_step(uint8_t pattern, uint8_t voice, uint8_t step)
 }
 
 /* ---- MIDI ------------------------------------------------------------------ */
+API void lxr_midi_in_byte(uint8_t b) { emu_midi_in_byte(b); }
+
 API void lxr_midi_in(const uint8_t *bytes, int len)
 {
 	for (int i = 0; i < len; i++) emu_midi_in_byte(bytes[i]);

@@ -106,6 +106,12 @@ DWT_Type *emu_dwt(void)
 	return &emu_dwt_regs;
 }
 
+/* Replaces Core/Src/delay.c: the counter is always running here. */
+uint32_t DWT_Delay_Init(void)
+{
+	return 0;
+}
+
 void Error_Handler(void)
 {
 	emu_fatal("Error_Handler called");
