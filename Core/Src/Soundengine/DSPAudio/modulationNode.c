@@ -41,6 +41,13 @@ static void modNode_setOriginalValueChanged(ModulationNode* vm, uint16_t idx)
 
 	if(vm->destination == idx) { //parameter is active in this modulator
 		const Parameter *p=&parameterArray[idx];
+#ifdef LXR_EMU
+		// Destination 0 has no pointer. The device reads address 0 (ITCM) here,
+		// the host can't. The value is never written back (every write checks
+		// p->ptr), so skipping the read changes nothing.
+		if(!p->ptr)
+			return;
+#endif
 
 			//update orig value
 			switch(p->type)

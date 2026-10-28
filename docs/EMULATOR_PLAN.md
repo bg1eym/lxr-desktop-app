@@ -135,4 +135,48 @@ C API 至少包括：
 
 （随开发更新。每条写明文件、位置和原因。）
 
-- 暂无。
+- `Core/Src/Soundengine/DSPAudio/modulationNode.c`，`modNode_setOriginalValueChanged()`：调制目标 0 没有指针，真机在这里会读地址 0（ITCM，能读），PC 上会崩。加了和 `modNode_setDestination()` 里固件自己已有的一样的 `if(!p->ptr) return;`。读到的值本来就不会被写回（所有写入都先检查 `p->ptr`），所以行为不变。
+
+## 实现记录
+
+### P0（本机构建）—— 已完成
+
+构建和运行：
+
+```
+cmake -S emu -B build/emu -DCMAKE_C_COMPILER=clang
+cmake --build build/emu
+build/emu/lxr_cli render --demo --out demo.wav     # 2 小节演示节奏
+build/emu/lxr_cli selftest                          # 不静音 + 同种子逐字节相同 + 不同种子不同
+ctest --test-dir build/emu
+```
+
+结构（和第 4 节的建议基本一致）：
+
+- `emu/shim/`：同名头文件，放在 include 路径最前面，替掉 `main.h`、`stm32f7xx_hal.h`、`stm32f7xx.h`、`usbd_cdc.h`、`usbd_cdc_if.h`。外设寄存器就是内存里的结构体；`__SSAT`、`__QADD16`、`__PKHBT`、`__CLZ` 等用 C 写了等价实现，`__SSAT` 对浮点参数按 ARM VCVT 的方式饱和转换。
+- `emu/hw/`：`hal_emu.c`（GPIO、定时器、SPI 移位寄存器 = 虚拟按键和 LED、可设种子的 xorshift32 代替硬件 RNG、时间），`lcd_emu.c`（HD44780 模型，替掉 `lcd.c`），`sd_emu.c`（虚拟 SD 卡），`usb_emu.c`（USB-MIDI 队列）。
+- `emu/platform.c`：替掉 `main.c` 和 `stm32f7xx_it.c`。按原顺序开机；之后每 64 帧跑一次 TIM14、SysTick、DMA 半传输和一遍主循环。
+- `emu/api.c` + `emu/lxr_api.h`：C API。`emu/cli/lxr_cli.c`：命令行工具。
+- 除 `main.c`、`stm32f7xx_it.c`、CubeMX 初始化、`flash_if.c`、`lcd.c`、`cs4344_cs5343.c` 和 USB 协议栈外，固件源码全部原样编译，FatFs 也一样。
+
+和第 3 节计划不同的决定：
+
+- **SD 卡用固件自带的 FatFs，而不是映射到 POSIX。** 虚拟卡是一块稀疏的内存盘（512 字节扇区，用到才分配），上面跑固件自己的 `ff.c` 和 `ffconf.h`。这样 8.3 文件名、大小写、目录顺序、`f_chdir` 相对路径都和真机一模一样，本机和 WASM 也是同一份代码，不需要 MEMFS。导入导出时用 FatFs 读写卡里的文件即可（P1 做）。
+- **时钟按真机的精确比例走，不按 44100。** I2S 实际采样率 = 22.6 MHz / 512 = 44140.625 Hz（和 `REAL_FS` 一致），TIM14 = 108 MHz / 13501 / 2 = 3999.70 Hz，SysTick = 1 kHz。用整数累加，每个采样对应的 tick 数和真机完全相同，所以渲染出的采样流和真机逐样本对应；浏览器按 44100 播放时会慢 0.09%（约 1.6 音分）。
+- **LCD 在 API 层模拟**（`lcd.h` 的函数接到 HD44780 模型上），不在 GPIO 层。非阻塞版本一次调用就完成。
+- **一个进程只能开机一次**（`lxr_init` 第二次调用返回 -2）。固件状态都在全局变量里，只有真正“断电”才能清零；WASM 端要重启就重新实例化模块。
+
+模拟器格式化空卡时和真机不同的一点：
+
+- 真机的 `sd_formatRoutine()` 在 `soundengine_init()` 之前运行，所以工程 0 里存的 pattern 全是 0，音轨长度也是 0。音序器随后会算 `x % 0`：ARM 的 UDIV 除零返回 0（不报错），x86 和 WASM 会崩。模拟器格式化时先调一次 `seq_init()`，存进去的是清空的 16 步 pattern。
+
+已知差异和注意事项：
+
+- **整数除零**：ARM 返回 0，x86/WASM 会崩。正常数据（长度 ≥ 1）不会触发；如果真机卡上有长度为 0 的音轨，模拟器会崩。真碰到了再处理。
+- **浮点转整数溢出**：ARM 饱和，x86 得到 0x80000000，WASM 默认饱和。只在溢出时有差别，P5 A/B 时留意。
+- **`-ffast-math`**：固件在 ARM 上用 `-ffast-math` 编译，模拟器用的是默认的 IEEE 语义。P5 A/B 时可能会看到很小的差别。
+- **flush-to-zero**：`soundengine_init()` 打开了 FZ，主机上没有。非规格化数只影响极小的值，听不出来，但会影响逐位对比。
+- **`__fp16`**：混响/延时缓冲区用半精度浮点存储，需要 clang（gcc 在 x86 上不支持 `__fp16`）。
+- **输出接口**：`mixer.c` 把 `MIXER_ROUTING_DAC1_*`（Out 1）写进它的 `output2` 参数，也就是 `dma_buffer2`。插孔检测脚为高电平表示插了线，没插线的输出会被固件改送到别的输出。默认只插 Out 1；`lxr_set_jacks()` 可以改。
+- **推子**：LXR-02 有 6 个音量推子，固件经 ADC 读取。虚拟推子默认推满（`emu_set_fader()`）。
+- **性能**：本机 -O2 渲染 64 秒音频耗时 0.87 秒，约为实时速度的 73 倍。
