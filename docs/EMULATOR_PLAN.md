@@ -205,4 +205,13 @@ npm run dev       # 本地开发；npm run build 生成 dist/
 - **`CodecInit`**：`Soundengine.c` 带一个参数调用它，`AudioCodecManager.c` 的定义却没有参数。ARM 上没事，WASM 里这种调用会 trap。`AudioCodecManager.c`（声卡初始化和 DMA 缓冲区）已换成 `emu/platform.c` 里签名匹配的版本。
 - **`delay.c`** 里有 ARM 内联汇编，换成了 `hal_emu.c` 里的 `DWT_Delay_Init()`。
 
-还没做（下一步候选）：虚拟 SD 卡保存到浏览器（IndexedDB），刷新页面后工程不会丢；导入/导出真机 SD 卡；第二组输出（Out 2）；Web MIDI；参数编辑器和步进网格（P3）。
+### 虚拟 SD 卡保存到浏览器 —— 已完成
+
+- `emu/hw/sd_emu.c` 记录哪些 64 KB 块被写过。API 新增 `lxr_sd_create()` + `lxr_boot()`（`lxr_init()` 等于两者连用），中间可以用 `lxr_sd_chunk_for_load()` 装回保存的块；`lxr_sd_take_dirty()` 和 `lxr_sd_chunk()` 取出写过的块。
+- AudioWorklet 每 0.5 秒把脏块交给页面；页面（`web/src/sdStore.ts`）存进 IndexedDB（库 `lxr02-emu`，表 `sd-card`，键是块号）。开机时把所有块交给 AudioWorklet，装回后再开机。
+- "重启"先把最新的块同步回来再开机，卡上内容保留；"清空 SD 卡"删掉所有块再开机，固件会格式化一张新卡。
+- 格式化加开机一共写了 14 个块（约 0.9 MB）；之后每次自动存盘通常只写 1–2 块。
+- 固件自己会在停手 2 秒（`PRESET_SAVE_TIME`）后把当前 kit/pattern 存到 `/tmp`，开机时读回。所以改完 2 秒内刷新页面，和真机断电一样，最后的改动会丢。
+- Chromium 实测：改参数和步、刷新页面、重启都能保留；清空后回到出厂状态。
+
+还没做（下一步候选）：导入/导出真机 SD 卡（选择文件夹或 zip）；第二组输出（Out 2）；Web MIDI；参数编辑器和步进网格（P3）。

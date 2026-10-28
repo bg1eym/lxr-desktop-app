@@ -65,16 +65,38 @@ static void next_block(void)
  * instance of the WebAssembly module). */
 static int booted;
 
-API int lxr_init(uint32_t seed, uint32_t sd_megabytes)
+/* Insert an empty card of the given size. Saved contents can then be put
+ * back with lxr_sd_chunk_for_load() before lxr_boot(). */
+API int lxr_sd_create(uint32_t sd_megabytes)
+{
+	if (booted) return -2;
+	return emu_sd_init(sd_megabytes * 1024u * 1024u) == 0 ? 0 : -1;
+}
+
+/* Power on. A card without a file system is formatted first, like the
+ * firmware's format routine does after asking. */
+API int lxr_boot(uint32_t seed)
 {
 	if (booted) return -2;
 	booted = 1;
 	inq_rd = inq_wr = 0;
 	blk_pos = OUTPUT_DMA_SIZE;
-	if (emu_sd_init(sd_megabytes * 1024u * 1024u) != 0) return -1;
 	emu_boot_opts o = { .seed = seed, .jacks = 0, .format_blank_card = 1 };
 	return emu_boot(&o);
 }
+
+API int lxr_init(uint32_t seed, uint32_t sd_megabytes)
+{
+	const int r = lxr_sd_create(sd_megabytes);
+	return r ? r : lxr_boot(seed);
+}
+
+/* ---- SD card image (saving/restoring in the browser) ---------------------- */
+API uint32_t lxr_sd_chunk_size(void) { return emu_sd_chunk_size(); }
+API uint32_t lxr_sd_num_chunks(void) { return emu_sd_num_chunks(); }
+API const uint8_t *lxr_sd_chunk(uint32_t c) { return emu_sd_chunk(c); }
+API uint8_t *lxr_sd_chunk_for_load(uint32_t c) { return emu_sd_chunk_for_load(c); }
+API int32_t lxr_sd_take_dirty(void) { return emu_sd_take_dirty(); }
 
 /* Scratch buffer for callers that cannot pass their own memory (JS): up to
  * 512 frames x 4 channels. */

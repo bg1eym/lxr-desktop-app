@@ -17,6 +17,19 @@ extern "C" {
  * firmware's format routine). 0 = ok, -2 = already booted: firmware state
  * lives in globals, so boot once per process / WebAssembly instance. */
 int lxr_init(uint32_t seed, uint32_t sd_megabytes);
+/* The same in two steps, to put a saved card back in between. */
+int lxr_sd_create(uint32_t sd_megabytes);
+int lxr_boot(uint32_t seed);
+
+/* SD card image in chunks of lxr_sd_chunk_size() bytes. lxr_sd_chunk()
+ * returns NULL for a chunk never written (reads as zeros);
+ * lxr_sd_take_dirty() returns the next chunk written since it was last
+ * reported, or -1. */
+uint32_t lxr_sd_chunk_size(void);
+uint32_t lxr_sd_num_chunks(void);
+const uint8_t *lxr_sd_chunk(uint32_t c);
+uint8_t *lxr_sd_chunk_for_load(uint32_t c);
+int32_t lxr_sd_take_dirty(void);
 
 /* Interleaved output, channels = 2 (out 1) or 4 (out 1 L/R, out 2 L/R). */
 int lxr_render(float *out, int frames, int channels);

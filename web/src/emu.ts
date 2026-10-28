@@ -28,17 +28,26 @@ type Msg =
   | { t: 'param'; i: number; v: number }
   | { t: 'midi'; data: number[] };
 
+import { SdStore, type Chunk } from './sdStore';
+
 const BASE = import.meta.env.BASE_URL;
+const SD_MEGABYTES = 64;
 
 export class LxrEmu {
   onState: (s: PanelState) => void = () => {};
   onLoad: (load: number) => void = () => {};
   onLog: (line: string) => void = (s) => console.log('[lxr]', s);
+  /** The card was written (bytes stored, whether it survives a reload). */
+  onCard: (bytes: number, persistent: boolean) => void = () => {};
 
+  readonly card = new SdStore();
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private wasm: ArrayBuffer | null = null;
   private faders = [1, 1, 1, 1, 1, 1];
+  private syncId = 0;
+  private syncWaiters = new Map<number, () => void>();
+  private cardLoaded = false;
 
   /** Start audio and boot the device. Call from a user gesture. */
   async start(): Promise<{ bootMs: number }> {
@@ -53,13 +62,37 @@ export class LxrEmu {
       if (!res.ok) throw new Error(`lxr_emu.wasm: HTTP ${res.status}`);
       this.wasm = await res.arrayBuffer();
     }
+    if (!this.cardLoaded) {
+      await this.card.load();
+      this.cardLoaded = true;
+    }
     await this.ctx.resume();
     return this.boot();
   }
 
-  /** Power cycle: a fresh instance of the firmware on a fresh SD card. */
+  /** Power cycle with the card in: what was saved on it is kept. */
   async reboot(): Promise<{ bootMs: number }> {
+    await this.syncCard();
     return this.boot();
+  }
+
+  /** Power off, wipe the card, power on: the firmware formats it. */
+  async eraseCardAndReboot(): Promise<{ bootMs: number }> {
+    this.stop();
+    await this.card.erase();
+    this.onCard(this.card.size, this.card.persistent);
+    return this.boot();
+  }
+
+  /** Fetch everything written to the card so far and store it. */
+  syncCard(): Promise<void> {
+    if (!this.node) return Promise.resolve();
+    const id = ++this.syncId;
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => { this.syncWaiters.delete(id); resolve(); }, 1000);
+      this.syncWaiters.set(id, () => { clearTimeout(timer); resolve(); });
+      this.node!.port.postMessage({ t: 'syncSd', id });
+    });
   }
 
   get sampleRate(): number {
@@ -70,12 +103,18 @@ export class LxrEmu {
     return this.ctx?.state === 'running';
   }
 
-  private boot(): Promise<{ bootMs: number }> {
-    if (!this.ctx || !this.wasm) return Promise.reject(new Error('not started'));
+  private stop() {
     if (this.node) {
       this.node.port.onmessage = null;
       this.node.disconnect();
+      this.node = null;
     }
+  }
+
+  private boot(): Promise<{ bootMs: number }> {
+    if (!this.ctx || !this.wasm) return Promise.reject(new Error('not started'));
+    this.stop();
+    const sdChunks = this.card.snapshot();
     const node = new AudioWorkletNode(this.ctx, 'lxr-processor', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
@@ -83,7 +122,8 @@ export class LxrEmu {
       processorOptions: {
         wasm: this.wasm,
         seed: (Math.random() * 0xffffffff) >>> 0,
-        sdMegabytes: 64,
+        sdMegabytes: SD_MEGABYTES,
+        sdChunks,
       },
     });
     node.connect(this.ctx.destination);
@@ -100,6 +140,13 @@ export class LxrEmu {
           case 'state': this.onState(m as PanelState); break;
           case 'load': this.onLoad(m.load); break;
           case 'log': this.onLog(m.s); break;
+          case 'sd': {
+            const chunks = m.chunks as Chunk[];
+            const saved = this.card.save(chunks);
+            if (chunks.length) this.onCard(this.card.size, this.card.persistent);
+            if (m.id !== undefined) saved.then(() => this.syncWaiters.get(m.id)?.());
+            break;
+          }
         }
       };
     });

@@ -30,8 +30,12 @@ void emu_time_set_ms(uint32_t ms);
 /* Virtual SD card (emu/hw/sd_emu.c): a RAM disk with a FAT32 volume made
  * by the firmware's own FatFs. */
 int emu_sd_init(uint32_t size_bytes);
-uint8_t *emu_sd_image(uint32_t *size_bytes);
 void emu_sd_set_present(int present);
+uint32_t emu_sd_chunk_size(void);
+uint32_t emu_sd_num_chunks(void);
+const uint8_t *emu_sd_chunk(uint32_t c);
+uint8_t *emu_sd_chunk_for_load(uint32_t c);
+int32_t emu_sd_take_dirty(void);
 
 void emu_fatal(const char *msg);
 

@@ -90,7 +90,11 @@ startBtn.type = 'button';
 const rebootBtn = h('button', 'tool', '重启');
 rebootBtn.type = 'button';
 rebootBtn.disabled = true;
+const eraseBtn = h('button', 'tool', '清空 SD 卡');
+eraseBtn.type = 'button';
+eraseBtn.disabled = true;
 const status = h('span', 'status', '未启动');
+const card = h('span', 'status', '');
 const load = h('span', 'status load', '');
 
 const device = h('main', 'device',
@@ -108,13 +112,14 @@ const overlay = h('div', 'overlay',
 document.querySelector('#app')!.append(
   h('header', 'bar',
     h('div', 'brand', h('strong', '', 'LXR-02 Emu'), h('span', 'tag', 'unofficial')),
-    h('div', 'tools', rebootBtn, status, load)),
+    h('div', 'tools', rebootBtn, eraseBtn, status, card, load)),
   h('div', 'stage', device, overlay),
   h('section', 'help',
     h('h3', '', '操作'),
     h('ul', '',
       h('li', '', '旋钮 1–4、DATA 编码器：上下拖动或滚轮；DATA 中间的圆钮是按压。'),
       h('li', '', '按键：按住即按下，松开即抬起。SHIFT 可以点击锁定，再点一次松开。'),
+      h('li', '', 'SD 卡保存在浏览器里，刷新页面或“重启”都不会丢。固件会在你停手约 2 秒后把当前 kit 和 pattern 自动存到卡上（和真机一样）；要长期保存，用 SAVE 存进工程。'),
       h('li', '', '键盘：Space = START/STOP，Shift = SHIFT，←/→ = DATA，Enter = 按 DATA，PageUp/PageDown = 翻页，1–7 = 声部，Q–I / A–K = 步 1–16，Z/X/C/V = 模式键。'))),
   h('footer', 'foot',
     '非官方项目，与 Erica Synths 无关。运行的是 LXR-02 1.7 官方开源固件（GPL-3.0），声音由固件代码实时生成。'));
@@ -128,25 +133,37 @@ emu.onState = (s: PanelState) => {
   }
 };
 emu.onLoad = (l) => { load.textContent = `DSP ≈ ${(l * 100).toFixed(1)}%`; };
+emu.onCard = (bytes, persistent) => {
+  const mb = (bytes / 1048576).toFixed(1);
+  card.textContent = persistent ? `SD 卡 ${mb} MB · 已存到浏览器` : 'SD 卡不会保存（浏览器禁止了本地存储）';
+};
 
-async function power(first: boolean) {
+async function power(how: 'start' | 'reboot' | 'erase') {
   startBtn.disabled = true;
   rebootBtn.disabled = true;
+  eraseBtn.disabled = true;
   status.textContent = '启动中…';
   try {
-    const { bootMs } = first ? await emu.start() : await emu.reboot();
+    const { bootMs } = how === 'start' ? await emu.start() : how === 'reboot' ? await emu.reboot() : await emu.eraseCardAndReboot();
     status.textContent = `运行中 · ${emu.sampleRate} Hz · 开机 ${bootMs} ms`;
+    emu.onCard(emu.card.size, emu.card.persistent);
     overlay.hidden = true;
     device.classList.add('live');
     rebootBtn.disabled = false;
+    eraseBtn.disabled = false;
   } catch (err) {
     status.textContent = `出错：${(err as Error).message}`;
     startBtn.disabled = false;
     console.error(err);
   }
 }
-startBtn.addEventListener('click', () => power(true));
-rebootBtn.addEventListener('click', () => power(false));
+startBtn.addEventListener('click', () => power('start'));
+rebootBtn.addEventListener('click', () => power('reboot'));
+eraseBtn.addEventListener('click', () => {
+  if (confirm('清空虚拟 SD 卡？卡上所有工程、kit 和 pattern 都会删除，固件会重新格式化一张空卡。')) power('erase');
+});
+// Leaving the page: hand over what the firmware wrote since the last sync.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') emu.syncCard(); });
 
 /* ---- keyboard ------------------------------------------------------------- */
 const keyButtons: Record<string, number> = {

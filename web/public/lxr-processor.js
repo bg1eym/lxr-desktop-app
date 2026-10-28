@@ -11,6 +11,7 @@
 
 const QUANTUM = 128;
 const STATE_EVERY = 4;          /* quanta between state messages, ~86 Hz */
+const SD_EVERY = 172;           /* quanta between SD card syncs, ~0.5 s */
 
 /* The module only needs fd_write (printf to stdout/stderr), fd_seek and
  * fd_close from WASI. AudioWorkletGlobalScope has no TextDecoder, the text
@@ -53,13 +54,23 @@ class LxrProcessor extends AudioWorkletProcessor {
 			if (this.x) this.handle(e.data); else this.pending.push(e.data);
 		};
 
-		const { wasm, seed, sdMegabytes } = options.processorOptions;
+		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs. */
+		const { wasm, seed, sdMegabytes, sdChunks } = options.processorOptions;
 		const imports = { wasi_snapshot_preview1: wasiImports(() => this.x.memory, (s) => this.port.postMessage({ t: 'log', s })) };
 		WebAssembly.instantiate(wasm, imports).then(({ instance }) => {
 			const x = instance.exports;
 			x._initialize();
 			const t0 = Date.now();
-			const res = x.lxr_init(seed >>> 0, sdMegabytes);
+			let res = x.lxr_sd_create(sdMegabytes);
+			if (res === 0) {
+				for (const [c, data] of sdChunks || []) {
+					const ptr = x.lxr_sd_chunk_for_load(c);
+					if (ptr) new Uint8Array(x.memory.buffer, ptr, data.byteLength).set(new Uint8Array(data));
+				}
+				/* the chunks just loaded are not news to the page */
+				while (x.lxr_sd_take_dirty() >= 0);
+				res = x.lxr_boot(seed >>> 0);
+			}
 			this.x = x;
 			this.bufPtr = x.lxr_audio_buffer();
 			for (const m of this.pending) this.handle(m);
@@ -79,6 +90,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		case 'jacks': x.lxr_set_jacks(m.m); break;
 		case 'param': x.lxr_set_param(m.i, m.v); break;
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
+		case 'syncSd': this.syncSd(m.id); break;
 		case 'getParams': {
 			const n = x.lxr_num_params();
 			const v = new Uint8Array(n);
@@ -86,6 +98,21 @@ class LxrProcessor extends AudioWorkletProcessor {
 			this.port.postMessage({ t: 'params', v }, [v.buffer]);
 			break;
 		}
+		}
+	}
+
+	/* Send the card chunks written since the last sync to the page, which
+	 * stores them. With an id, always answer, so the page knows it has
+	 * everything (before a reboot). */
+	syncSd(id) {
+		const x = this.x;
+		const size = x.lxr_sd_chunk_size();
+		const chunks = [];
+		for (let c; (c = x.lxr_sd_take_dirty()) >= 0;) {
+			chunks.push([c, new Uint8Array(x.memory.buffer, x.lxr_sd_chunk(c), size).slice().buffer]);
+		}
+		if (chunks.length || id !== undefined) {
+			this.port.postMessage({ t: 'sd', id, chunks }, chunks.map((c) => c[1]));
 		}
 	}
 
@@ -126,6 +153,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.renderQuanta++;
 
 		if (++this.quanta % STATE_EVERY === 0) this.postState();
+		if (this.quanta % SD_EVERY === 0) this.syncSd();
 		if (this.renderQuanta >= 1034) {   /* about every 3 s: Date.now() only has 1 ms steps */
 			const audioMs = this.renderQuanta * QUANTUM / sampleRate * 1000;
 			this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });

@@ -22,31 +22,72 @@
 #define CHUNK_BYTES (SECTOR_SIZE * CHUNK_SECTORS)
 
 static uint8_t **chunks;
+static uint8_t *dirty;           /* one flag per chunk, set on write */
+static uint32_t num_chunks;
 static uint32_t num_sectors;
 static int card_present = 1;
 
 int emu_sd_init(uint32_t size_bytes)
 {
 	if (chunks) {
-		for (uint32_t i = 0; i < (num_sectors + CHUNK_SECTORS - 1) / CHUNK_SECTORS; i++) free(chunks[i]);
+		for (uint32_t i = 0; i < num_chunks; i++) free(chunks[i]);
 		free(chunks);
+		free(dirty);
 	}
 	num_sectors = size_bytes / SECTOR_SIZE;
-	chunks = calloc((num_sectors + CHUNK_SECTORS - 1) / CHUNK_SECTORS, sizeof(uint8_t *));
-	return chunks ? 0 : -1;
+	num_chunks = (num_sectors + CHUNK_SECTORS - 1) / CHUNK_SECTORS;
+	chunks = calloc(num_chunks, sizeof(uint8_t *));
+	dirty = calloc(num_chunks, 1);
+	return (chunks && dirty) ? 0 : -1;
 }
 
 void emu_sd_set_present(int present) { card_present = present; }
 
-static uint8_t *sector_ptr(uint32_t sector, int alloc)
+static uint8_t *chunk_alloc(uint32_t c)
 {
-	const uint32_t c = sector / CHUNK_SECTORS;
 	if (!chunks[c]) {
-		if (!alloc) return NULL;
 		chunks[c] = calloc(1, CHUNK_BYTES);
 		if (!chunks[c]) emu_fatal("out of memory for SD card");
 	}
-	return chunks[c] + (sector % CHUNK_SECTORS) * SECTOR_SIZE;
+	return chunks[c];
+}
+
+static uint8_t *sector_ptr(uint32_t sector, int alloc)
+{
+	const uint32_t c = sector / CHUNK_SECTORS;
+	if (!chunks[c] && !alloc) return NULL;
+	return chunk_alloc(c) + (sector % CHUNK_SECTORS) * SECTOR_SIZE;
+}
+
+/* ---- card image access, for saving and restoring the card ----------------
+ * The image is handed out as CHUNK_BYTES pieces; pieces never written read
+ * as zeros. */
+uint32_t emu_sd_chunk_size(void) { return CHUNK_BYTES; }
+uint32_t emu_sd_num_chunks(void) { return num_chunks; }
+
+/* Chunk contents, or NULL if it was never written. */
+const uint8_t *emu_sd_chunk(uint32_t c)
+{
+	return c < num_chunks ? chunks[c] : NULL;
+}
+
+/* Memory to load a saved chunk into (before booting). */
+uint8_t *emu_sd_chunk_for_load(uint32_t c)
+{
+	return c < num_chunks ? chunk_alloc(c) : NULL;
+}
+
+/* Next chunk written since the last call that returned it, or -1. Clears
+ * the flag, so each write is reported once. */
+int32_t emu_sd_take_dirty(void)
+{
+	for (uint32_t c = 0; c < num_chunks; c++) {
+		if (dirty[c]) {
+			dirty[c] = 0;
+			return (int32_t)c;
+		}
+	}
+	return -1;
 }
 
 /* ---- FatFs low level driver --------------------------------------------- */
@@ -79,7 +120,10 @@ static DRESULT sd_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
 	(void)lun;
 	if (!card_present || !chunks) return RES_NOTRDY;
 	if ((uint64_t)sector + count > num_sectors) return RES_PARERR;
-	for (UINT i = 0; i < count; i++) memcpy(sector_ptr(sector + i, 1), buff + i * SECTOR_SIZE, SECTOR_SIZE);
+	for (UINT i = 0; i < count; i++) {
+		memcpy(sector_ptr(sector + i, 1), buff + i * SECTOR_SIZE, SECTOR_SIZE);
+		dirty[(sector + i) / CHUNK_SECTORS] = 1;
+	}
 	return RES_OK;
 }
 
