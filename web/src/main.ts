@@ -24,6 +24,9 @@ const BTN = {
   PAGE_DOWN: 40,
 };
 
+/* GPL-3.0: where the source of this build is. */
+const SOURCE_URL = 'https://github.com/bg1eym/lxr-desktop-app/tree/emu';
+
 const emu = new LxrEmu();
 const buttons = new Map<number, PanelButton>();
 
@@ -122,7 +125,10 @@ document.querySelector('#app')!.append(
       h('li', '', 'SD 卡保存在浏览器里，刷新页面或“重启”都不会丢。固件会在你停手约 2 秒后把当前 kit 和 pattern 自动存到卡上（和真机一样）；要长期保存，用 SAVE 存进工程。'),
       h('li', '', '键盘：Space = START/STOP，Shift = SHIFT，←/→ = DATA，Enter = 按 DATA，PageUp/PageDown = 翻页，1–7 = 声部，Q–I / A–K = 步 1–16，Z/X/C/V = 模式键。'))),
   h('footer', 'foot',
-    '非官方项目，与 Erica Synths 无关。运行的是 LXR-02 1.7 官方开源固件（GPL-3.0），声音由固件代码实时生成。'));
+    '非官方项目，与 Erica Synths 无关，也未经其认可。运行的是 Erica Synths LXR-02 开源固件 1.7 的修改版（GPL-3.0），声音由固件代码实时生成。',
+    h('br'),
+    'Unofficial emulator for the Erica Synths LXR-02 firmware; not affiliated with or approved by Erica Synths. ',
+    Object.assign(h('a', '', '源代码 / Source (GPL-3.0)'), { href: SOURCE_URL })));
 
 /* ---- device state -------------------------------------------------------- */
 emu.onState = (s: PanelState) => {

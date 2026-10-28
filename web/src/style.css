@@ -152,6 +152,7 @@ canvas.lcd { display: block; width: 420px; max-width: 100%; height: auto; image-
 .help h3 { margin: 0 0 4px; font-size: 13px; color: var(--ink); font-weight: 600; }
 .help ul { margin: 0; padding-left: 18px; }
 .foot { padding-bottom: 28px; font-size: 12px; color: var(--ink-faint); }
+.foot a { color: var(--ink-dim); }
 
 @media (max-width: 1180px) {
   .steps { justify-content: flex-start; }

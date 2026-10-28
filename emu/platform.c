@@ -102,6 +102,7 @@ int CodecInit(uint32_t fs)
 }
 
 static void encoder_hw_tick(void);
+static void splash_tick(void);
 
 /* ---- interrupt handlers --------------------------------------------------- */
 static void tim14_irq(void)        /* TIM8_TRG_COM_TIM14_IRQHandler */
@@ -116,6 +117,7 @@ static void tim14_irq(void)        /* TIM8_TRG_COM_TIM14_IRQHandler */
 static void systick_irq(void)      /* SysTick_Handler */
 {
 	emu_time_set_ms(++emu_ms_count);
+	splash_tick();
 	screensaver_timer++;
 	encoder_hw_tick();
 	encoder_callback();
@@ -298,6 +300,31 @@ void emu_set_fader(uint8_t idx, float pos)
 
 /* ---- boot ----------------------------------------------------------------- */
 
+/* The firmware's licence (NOTICE.md, GPL-3.0 section 7(c)) asks modified
+ * versions to say so on the start-up screen; this one replaces the
+ * "Sonic Potions / LXR2 Drums V 1.7" screen of main.c. */
+#define SPLASH_MS 1500
+static uint32_t splash_until_ms;
+
+static void show_splash(void)
+{
+	lcd_clear();
+	lcd_string("Unofficial Emu");
+	lcd_setcursor(0, 2);
+	lcd_string("based on fw");
+	lcd_string(FIRMWARE_VERSION);
+	lcd_showSplash();
+}
+
+static void splash_tick(void)
+{
+	if (splash_until_ms && emu_ms_count >= splash_until_ms) {
+		splash_until_ms = 0;
+		lcd_process_display_interrupt = 1;
+		menu_repaintAll();
+	}
+}
+
 /* Same steps as sd_formatRoutine() in main.c, without the two "are you sure"
  * prompts and the "please reboot" halt.
  * One difference: seq_init() runs first. On the device the routine runs
@@ -348,12 +375,7 @@ int emu_boot(const emu_boot_opts *opts)
 	adc_checkPots();
 	MX_FATFS_ReInit();
 
-	lcd_clear();
-	lcd_string("Sonic Potions");
-	lcd_setcursor(0, 2);
-	lcd_string("LXR2 Drums V");
-	lcd_string(FIRMWARE_VERSION);
-	lcd_showSplash();
+	show_splash();
 
 	/* mount, formatting a blank card first (sd_formatRoutine) */
 	sd_card_ok = 0;
@@ -428,7 +450,11 @@ int emu_boot(const emu_boot_opts *opts)
 	led_updateSeqLeds();
 	preset_resetAllSaveTimers();
 
-	lcd_process_display_interrupt = 1;
+	/* Keep the start-up screen up for a while, as the device does with its
+	 * HAL_Delay()s, then hand the display to the menu. */
+	show_splash();
+	lcd_process_display_interrupt = 0;   /* the preset loaders above switch it on */
+	splash_until_ms = emu_ms_count + SPLASH_MS;
 	return sd_card_ok ? 0 : 1;
 }
 

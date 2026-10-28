@@ -100,6 +100,10 @@ void lcd_init(void)
 	addr = 0;
 	addr_is_cg = 0;
 	entry_increase = 1;
+	/* lcd.c's init sequence ends with display on, cursor and blink off */
+	display_on = 1;
+	cursor_on = 0;
+	blink_on = 0;
 }
 
 void lcd_showSplash(void) { }

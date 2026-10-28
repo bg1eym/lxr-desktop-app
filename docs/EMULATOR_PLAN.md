@@ -215,3 +215,12 @@ npm run dev       # 本地开发；npm run build 生成 dist/
 - Chromium 实测：改参数和步、刷新页面、重启都能保留；清空后回到出厂状态。
 
 还没做（下一步候选）：导入/导出真机 SD 卡（选择文件夹或 zip）；第二组输出（Out 2）；Web MIDI；参数编辑器和步进网格（P3）。
+
+### 公开发布前的授权要求（NOTICE.md）
+
+固件是 GPL-3.0-only，`NOTICE.md` 按 GPL 第 7 条附加了两项条款，模拟器这样处理：
+
+- **7(c) 修改版要标明**：开机画面必须显示固件被改过。`emu/platform.c` 把 `main.c` 的 "Sonic Potions / LXR2 Drums V 1.7" 换成了 "Unofficial Emu / based on fw 1.7"，并停留 1.5 秒（模拟器时间，`SPLASH_MS`），然后才把屏幕交给菜单。网页底部也写明是非官方修改版。
+- **7(e) 商标**："Erica Synths"、"LXR"、"LXR-02" 不能用在让人以为来自 Erica Synths、或经其认可的地方；如实说明兼容性可以，例如 "custom firmware for the Erica Synths LXR-02"。网页和 README 都写了 "not affiliated with or approved by Erica Synths"。项目名 "LXR-02 Emu" 本身带商标，公开推广前最好换一个自己的名字（待 Qiang 决定）。
+- **GPL 源代码**：网页底部链接到构建所用的源代码（`emu` 分支）。
+- **硬件外观**：面板、外壳和工业设计不在 GPL 范围内，不能复制。网页面板是自己设计的通用布局，没有用 Erica Synths 的外观、logo 或面板印刷。
