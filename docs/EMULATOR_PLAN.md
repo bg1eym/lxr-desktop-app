@@ -1,0 +1,138 @@
+# LXR-02 浏览器模拟器（交接提示词 / 计划）
+
+> 非官方项目。"Erica Synths"、"LXR"、"LXR-02" 是商标，本项目称为 **LXR-02 Emu (unofficial)**。
+
+你在 Erica Synths LXR-02 官方开源固件的 fork 仓库里工作。代码是 v1.7（上游 commit `a43cd4f`），协议 GPL-3.0-only。用户叫 Qiang，用中文和他交流。他有一台 LXR-02，固件是 1.7，用的是 Mac + Chrome。他平时用 Ableton Move 学电子音乐，主要做 Techno 和 Trance。
+
+开始写代码前，先把这份文档存成 `docs/EMULATOR_PLAN.md`，新建分支 `emu`，之后分小步提交。
+
+## 1. 要做什么
+
+做一个在 Mac 的 Chrome 里运行的 LXR-02 模拟器兼编辑器。实体机器很难操作，用户想先在电脑上把音色参数和音序调好，再导入真机。
+
+- 跑的是官方固件自己的 C 代码，编译成 WASM，放在 AudioWorklet 里运行。这样声音和真机基本一致。
+- 用一套比硬件好用得多的界面来编辑音色（每个 kit 228 个参数）和音序。
+- 导出 SD 卡上的工程文件，拷进真机的 SD 卡后，1.7 固件能直接读取。
+- 后期再加 Web MIDI 联机：用 NRPN 把参数同步到真机，同时同步时钟。
+- 最后用 GitHub Actions 部署到 GitHub Pages，用户在 Mac 上打开一个网址就能用。
+
+不做：复刻硬件那套现场演奏流程（mute、roll、morph 留在真机上做）、刷机、动 bootloader。
+
+## 2. 核心原则：不重写
+
+声音引擎、音序器和存盘代码一律直接编译固件原文件，只替换硬件层。读写文件必须经过 `presetManager.c`，这样导出的文件和真机自己写出来的完全一样。确实必须改固件文件时，只加最小的 `#ifdef LXR_EMU`，并在本文档末尾的「固件改动清单」里列出。
+
+## 3. 已经从代码里核实的事实
+
+前一个会话读代码确认过以下内容。行号是大概位置，动手前再核对一遍。
+
+### 整体结构
+
+- 单片机是 STM32F765，只有一颗芯片，但代码还保留着初代 LXR 双芯片时的分工：
+  - 前面板这一侧：`menu/`、`Preset/presetManager.c`、`buttonHandler.c`、`frontPanelParser.c`、`ledHandler.c`、`lcd.c`。
+  - 声音引擎这一侧：`Soundengine/*`、`Soundengine/MIDI/CortexParser.c`。
+  - 两边通过 `Core/Src/Soundengine/MIDI/Uart.c` 里的内存 FIFO 通信：`fifo_frontTx`/`fifo_frontRx`、`uart_sendFrontpanelByte()`，以及 `frontPanelParser.c` 里的 `frontPanel_sendData()` → `uart_putc()`（`uart_putc` 在 `Core/Src/IO/uart.c`）。
+- 参数有两套枚举：前面板用 `Core/Inc/Parameters.h`，引擎用 `Core/Inc/Soundengine/MIDI/ParameterArray.h`。`END_OF_SOUND_PARAMETERS` = 228，之后是 `PAR_BEGINNING_OF_GLOBALS`（BPM 等全局参数），最后是 `NUM_PARAMS`。`NUM_KIT_SLOTS` = 64。
+- `menu.h` 里有这些数组：`activeParameters[NUM_PARAMS]` 是当前 kit 的编辑缓冲，`mainParameters[64][228]` 是内存里的全部 kit，另外还有 `parameter_dtypes[NUM_PARAMS]` 和 `paramToModTarget[]`。
+
+### 音频
+
+- I2S 采样率 44.1kHz，但 DSP 系数按 `REAL_FS = 44140.f` 计算（见 `Core/Inc/Soundengine/config.h`）。全程 int16。
+- 每块 `OUTPUT_DMA_SIZE = 64` 个立体声帧。`mixer_calcNextSampleBlock(dma_buffer半区, dma_buffer2半区)` 输出到两个立体声 DAC，共 4 路输出（`USE_DAC2 = 1`）。
+- 入口是 `soundengine_calcNextSampleBlock()`。它由 TIM2 中断调用，顺序是 `seq_tick(); soundengine_calcNextSampleBlock(); uart_processMidi();`（见 `stm32f7xx_it.c`）。`bCurrentSampleValid` 由 `cs4344_cs5343.c` 里的 DMA 回调切换。
+- 波表和瞬态采样都编进了代码（`DSPAudio/Samples.c`、`wavetable.c`、`transientTables.c`），不依赖外部采样文件。
+- ARM 专用指令：`__SSAT`、`__QADD16` 等，出现在 `CymbalVoice.c`、`ResonantFilter.c`、`Snare.c`、`HiHat.c`、`mixer.c`、`FX/*.c`、`FxBus.c`、`BufferTools.h`、`Reverb.h`。用 C 写等价实现。
+- 在引擎里用到 HAL 的地方：`DSPAudio/random.c`（`HAL_RNG_GetRandomNumber`，改成可设种子的 PRNG，测试要能复现）、`1PoleLp.c`、`sequencer.c`。`soundengine_init()` 里有 `FPU->FPDSCR` 的 flush-to-zero 设置（WASM 里不支持，可忽略，但要留意 denormal）。
+- 段属性 `INDTCM`、`INDTCMZ`、`IN_ITCM_RAM` 定义成空。
+
+### 时钟
+
+- TIM14 中断约 4kHz，每 0.25ms 一次（108MHz ÷ 13501 ÷ 2）。它会把 `systick_ticks` 加一；当 `lcd_process_display_interrupt` 为真时，还会连续调用 4 次 `menu_tick()`。
+- 音序器靠 `systick_ticks` 计时：`seq_deltaT = (60000/bpm)/96*4`，单位是 0.25ms，内部 96 ppq。
+- 模拟方式：以音频采样数作为唯一时钟。每渲染 64 帧，systick 前进 64/44100×4000 ≈ 5.8 tick（用小数累加），对每个 tick 执行 TIM14 那段逻辑，再执行一次 TIM2 那段逻辑，然后跑一遍主循环。
+
+### 开机和主循环（`main.c`）
+
+- 开机流程大约在 239–917 行：`menu_init()` → `f_mount` → 对 64 个槽位调用 `preset_loadProjectNames(i)` → 因为 `LOAD_PROJECT_ON_BOOT = 1`（`Core/Inc/config.h`），执行 `preset_loadLastUsedProjectNrFromSD()` + `preset_loadProject()` → `preset_initTmpFolder()` → `loadTmpFolderFiles()` → `preset_LoadTmpKit()` → `preset_LoadTmpPat()`。
+- 主循环大约在 918–1000 行：`adc_checkPots`、`soundengine_process`、`buttonHandler_tick`、`menu_parseEncoder`、`led_tickHandler`、`dio_process`、`adc_checkFaders`、USB MIDI、`uart_processMidi`、`preset_processTimer`。
+- 写 `emu/platform.c` 取代 `main.c`，按原顺序复刻开机流程，主循环做成每块调用一次的 `emu_main_loop_iteration()`。
+
+### SD 卡和文件格式
+
+- 工程目录是 `/projNN/`（代码里是 `sprintf("/proj%02d")`）。文件名格式为 `NN-NAME.ext`，NAME 取名字前 5 个字符，空格换成 `_`。扩展名：`.snd`（kit）、`.pat`、`.all`、`.prj`、`.sng`。另有一个 `/tmp` 目录放自动存档（`tmp.snd`、`tmp.pat`）。FatFs 配置在 `FATFS/Target/ffconf.h`：`_USE_LFN 0`，只用 8.3 短文件名；`_FS_RPATH 1`，代码依赖 `f_chdir` 的相对路径。
+- kit 文件基本就是 `activeParameters[0..228)` 的原样 dump，具体头部结构见 `preset_writeDrumsetData`/`preset_readDrumsetData`。pattern 带版本号，见 `preset_readPatternData(patternNr, dataVersion)`。
+- 保留 FatFs 的 API，把 `f_open/f_read/f_write/f_close/f_lseek/f_stat/f_mkdir/f_chdir/f_getcwd/f_opendir/f_readdir/f_unlink/f_rename/f_mount` 映射到 POSIX：本机构建用真实目录，WASM 构建用 Emscripten MEMFS。`FIL`、`DIR`、`FILINFO`、`FRESULT` 的类型和语义要和原版一致，包括 8.3 文件名和大小写行为。
+
+### MIDI
+
+- 官方固件能接收 NRPN 和 CC 来设置音色参数（见 `MidiParser.c`）。
+- 没有外部 SysEx 导入 kit 或 pattern 的功能。`CortexParser.c` 里的 SysEx 是前面板和引擎之间的内部协议。
+- 所以把 pattern 导进真机只能走 SD 卡；音色参数可以用 NRPN/CC 实时同步。NRPN 和参数的对应关系从 `MidiParser.c`、`ParameterArray.c` 里推导。
+
+### UI 能直接借用的表
+
+- 参数页、文字和数据类型在 `Core/Inc/menu/menuPages.h`、`MenuText.h`、`menu.c`（`parameter_dtypes`）、`Cc2Text.c` 里。参数名、范围、分组都从这些表生成，不要手写。
+
+### 硬件界面
+
+- LCD 是 2×16 字符屏（`lcd.c`，HD44780 风格）。
+- 按键和 LED 经移位寄存器连接（`IO/DIO.c`，走 SPI）。旋钮走 ADC（`IO/adcPots.c`），另有 `encoder.c`。
+- 都做成虚拟版本：LCD 写进字符缓冲，按键、LED、旋钮做成内存数组。这样可以在网页上显示一个调试用的虚拟面板，也可以直接驱动原菜单代码完成存盘这类操作。
+
+## 4. 目录和架构建议
+
+```
+emu/
+  shim/        假的 stm32f7xx_hal.h、cmsis 内建函数、FatFs 转 POSIX
+  platform.c   取代 main.c、codec、USB、UART、DIO/ADC/LCD 的硬件部分
+  api.c        导出给 JS 的 C API
+  cli/         本机命令行：离线渲染 WAV、回归测试
+  CMakeLists.txt（本机构建 + Emscripten 构建）
+web/           前端（Vite + TypeScript，框架尽量轻）
+.github/workflows/pages.yml   构建 WASM 和前端，部署到 GitHub Pages
+```
+
+C API 至少包括：
+
+- `lxr_init(seed)`
+- `lxr_render(float* out4ch, int frames)`
+- `lxr_set_param(idx, val)` 和 `lxr_get_param(idx)`：走前面板改参数的同一条路径，保证 `activeParameters` 和引擎状态一致
+- 步进编辑：读写 step、velocity、probability、p-lock，走前面板的音序函数
+- `lxr_trigger(voice, vel)`
+- 走带控制：start、stop、bpm
+- 工程操作：save、load kit、pattern、project，一律调用 presetManager
+- `lxr_midi_in(bytes)`，以及 MIDI out 回调
+- `lxr_get_lcd()` 和 LED 状态
+
+前端：
+
+- 7 条轨（Drum 1–3、Snare/Clap、Cymbal、Closed/Open Hat）。每个音色的参数按硬件分页分组（OSC、AEG、Pitch/Mod EG、FM、Transient/Click、Filter、LFO、Mix），FX Bus 单独一组。
+- 步进网格：16 步，每步可展开 8 个子步；支持 velocity、probability、p-lock 和 pattern 链。
+- 导入导出：用 File System Access API（`showDirectoryPicker`，Chrome 支持）直接读写 SD 卡目录，同时提供 zip 下载作为备选。
+- 可选的虚拟前面板（LCD + 按键），用于调试和核对。
+- 可以把任意 pattern 导出成 WAV 或分轨，方便用户拿到 Move 上用。
+
+参考项目：`github.com/dmajka/elixir`（GPL-3）。它把 LXR-02 移植到了 M-VAVE FM-1，有一个浏览器模拟器（用 Web MIDI 跑固件 C 代码），DSP 改成了定点。它的浏览器和 Web MIDI 部分可以参考，但我们用官方浮点代码，以保证和真机一致。
+
+## 5. 分阶段计划和验收标准
+
+- **P0 本机构建**：`emu/cli` 编译、链接通过；用默认 kit 和 pattern 渲染 2 小节 WAV，不能是静音，不能有 NaN；同一个种子渲染两次，结果逐字节相同。
+- **P1 文件往返**：从空目录开机，生成的目录结构和真机一致；读入用户提供的真机 SD 卡 dump 后原样存回，文件逐字节相同（有意的修改除外）。到这一步时，用中文请用户把 SD 卡整个拷一份上传。
+- **P2 WASM**：在 Chrome 里通过 AudioWorklet 出声，CPU 占用低于一个核的 30%，没有爆音。
+- **P3 编辑器**：参数面板和步进网格可用；导出的文件拷进 SD 卡后真机能加载（请用户实测）。
+- **P4 Web MIDI**：NRPN 参数镜像，时钟进出。
+- **P5 和真机 A/B**：请用户用真机录几段参考音（每个音色用 init 设置，加几组指定参数），和模拟器渲染的结果做频谱对比或相减测试，把偏差记下来（比如 `REAL_FS` 44140 和 44100 的差别）。
+- 每完成一个阶段：提交代码，把能用的网址或产物交给用户，用中文写一两句进展。
+
+## 6. 约束
+
+- 模拟器属于 GPL-3.0-only 固件的衍生作品，所以整体也用 GPL-3.0；保留 `LICENSE` 和 `NOTICE.md`。
+- 页面和 README 要写明是非官方项目。"Erica Synths"、"LXR"、"LXR-02" 是商标，不要当成产品名，可以叫 "LXR-02 Emu (unofficial)"。
+- 不修改 bootloader，不碰刷机相关的 target。
+- 先跑通 P0，不要一开始就写界面。
+
+## 固件改动清单（`#ifdef LXR_EMU`）
+
+（随开发更新。每条写明文件、位置和原因。）
+
+- 暂无。
