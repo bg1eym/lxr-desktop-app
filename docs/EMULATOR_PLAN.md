@@ -11,7 +11,7 @@
 做一个在 Mac 的 Chrome 里运行的 LXR-02 模拟器兼编辑器。实体机器很难操作，用户想先在电脑上把音色参数和音序调好，再导入真机。
 
 - 跑的是官方固件自己的 C 代码，编译成 WASM，放在 AudioWorklet 里运行。这样声音和真机基本一致。
-- 用一套比硬件好用得多的界面来编辑音色（每个 kit 228 个参数）和音序。
+- 用一套比硬件好用得多的界面来编辑音色（每个 kit 247 个参数）和音序。
 - 导出 SD 卡上的工程文件，拷进真机的 SD 卡后，1.7 固件能直接读取。
 - 后期再加 Web MIDI 联机：用 NRPN 把参数同步到真机，同时同步时钟。
 - 最后用 GitHub Actions 部署到 GitHub Pages，用户在 Mac 上打开一个网址就能用。
@@ -32,7 +32,7 @@
   - 前面板这一侧：`menu/`、`Preset/presetManager.c`、`buttonHandler.c`、`frontPanelParser.c`、`ledHandler.c`、`lcd.c`。
   - 声音引擎这一侧：`Soundengine/*`、`Soundengine/MIDI/CortexParser.c`。
   - 两边通过 `Core/Src/Soundengine/MIDI/Uart.c` 里的内存 FIFO 通信：`fifo_frontTx`/`fifo_frontRx`、`uart_sendFrontpanelByte()`，以及 `frontPanelParser.c` 里的 `frontPanel_sendData()` → `uart_putc()`（`uart_putc` 在 `Core/Src/IO/uart.c`）。
-- 参数有两套枚举：前面板用 `Core/Inc/Parameters.h`，引擎用 `Core/Inc/Soundengine/MIDI/ParameterArray.h`。`END_OF_SOUND_PARAMETERS` = 228，之后是 `PAR_BEGINNING_OF_GLOBALS`（BPM 等全局参数），最后是 `NUM_PARAMS`。`NUM_KIT_SLOTS` = 64。
+- 参数有两套枚举：前面板用 `Core/Inc/Parameters.h`，引擎用 `Core/Inc/Soundengine/MIDI/ParameterArray.h`。`END_OF_SOUND_PARAMETERS` = 247（不是 228，`Parameters.h` 里的注释过时了），之后是 `PAR_BEGINNING_OF_GLOBALS`（`PAR_BPM` = 272），最后是 `NUM_PARAMS` = 302。`NUM_KIT_SLOTS` = 64。
 - `menu.h` 里有这些数组：`activeParameters[NUM_PARAMS]` 是当前 kit 的编辑缓冲，`mainParameters[64][228]` 是内存里的全部 kit，另外还有 `parameter_dtypes[NUM_PARAMS]` 和 `paramToModTarget[]`。
 
 ### 音频
@@ -60,7 +60,7 @@
 ### SD 卡和文件格式
 
 - 工程目录是 `/projNN/`（代码里是 `sprintf("/proj%02d")`）。文件名格式为 `NN-NAME.ext`，NAME 取名字前 5 个字符，空格换成 `_`。扩展名：`.snd`（kit）、`.pat`、`.all`、`.prj`、`.sng`。另有一个 `/tmp` 目录放自动存档（`tmp.snd`、`tmp.pat`）。FatFs 配置在 `FATFS/Target/ffconf.h`：`_USE_LFN 0`，只用 8.3 短文件名；`_FS_RPATH 1`，代码依赖 `f_chdir` 的相对路径。
-- kit 文件基本就是 `activeParameters[0..228)` 的原样 dump，具体头部结构见 `preset_writeDrumsetData`/`preset_readDrumsetData`。pattern 带版本号，见 `preset_readPatternData(patternNr, dataVersion)`。
+- kit 文件基本就是 `activeParameters[0..247)` 的原样 dump，具体头部结构见 `preset_writeDrumsetData`/`preset_readDrumsetData`。pattern 带版本号，见 `preset_readPatternData(patternNr, dataVersion)`。
 - 保留 FatFs 的 API，把 `f_open/f_read/f_write/f_close/f_lseek/f_stat/f_mkdir/f_chdir/f_getcwd/f_opendir/f_readdir/f_unlink/f_rename/f_mount` 映射到 POSIX：本机构建用真实目录，WASM 构建用 Emscripten MEMFS。`FIL`、`DIR`、`FILINFO`、`FRESULT` 的类型和语义要和原版一致，包括 8.3 文件名和大小写行为。
 
 ### MIDI
@@ -180,3 +180,29 @@ ctest --test-dir build/emu
 - **输出接口**：`mixer.c` 把 `MIXER_ROUTING_DAC1_*`（Out 1）写进它的 `output2` 参数，也就是 `dma_buffer2`。插孔检测脚为高电平表示插了线，没插线的输出会被固件改送到别的输出。默认只插 Out 1；`lxr_set_jacks()` 可以改。
 - **推子**：LXR-02 有 6 个音量推子，固件经 ADC 读取。虚拟推子默认推满（`emu_set_fader()`）。
 - **性能**：本机 -O2 渲染 64 秒音频耗时 0.87 秒，约为实时速度的 73 倍。
+
+### Web App（虚拟前面板）—— 第一版
+
+用户要求先做 Web App（P1 的 SD 卡往返暂缓）。现在的状态：
+
+```
+cd web
+npm ci
+npm run wasm      # 用 clang 编译 emu/ 到 public/lxr_emu.wasm
+npm run dev       # 本地开发；npm run build 生成 dist/
+```
+
+- **WASM 不用 Emscripten**：clang 18 直接编译到 `wasm32-wasi`（`emu/cmake/wasi-clang.cmake`，Ubuntu 包 `clang lld wasi-libc libclang-rt-18-dev-wasm32`），生成一个约 400 KB 的 reactor 模块，只导出 `lxr_*` API。模块只需要 3 个 WASI 函数（`fd_write`、`fd_seek`、`fd_close`），在 AudioWorklet 里给几个空实现就行，不需要胶水 JS。
+- **`web/public/lxr-processor.js`**：AudioWorklet 处理器，在音频线程里实例化 WASM，每 128 帧调用 `lxr_render`，约 86 Hz 回传 LCD/LED 状态（有变化才发）。
+- **`web/src/`**：Vite + TypeScript，没有框架。`lcd.ts` 用 HD44780 A00 字库（取自 char-lcd，MIT）画 5×8 点阵，CGRAM 自定义字符和光标都按显示 RAM 画；`controls.ts` 是按键、无级旋钮、DATA 编码器和推子；`main.ts` 负责布局和键盘快捷键。
+- **输入都走硬件信号**：按键经虚拟移位寄存器（`IO/DIO.c` 读）；DATA 编码器在 SysTick 里逐个输出正交相位，由固件的 `encoder.c` 解码（一格 = 4 次相位变化，按钮至少保持 60 ms，满足固件的去抖）；4 个旋钮按双滑臂 360° 电位器模拟 ADC 读数（`calcPosition()` 的反函数），每 2° 对应一个参数步进，菜单类参数要转 16°，和真机一样；6 个推子写 ADC 通道 8–13。
+- **`.github/workflows/pages.yml`**：构建本机版并跑自测、构建 WASM 和网页、部署到 GitHub Pages。需要在仓库 Settings > Pages 里把 Source 设成 "GitHub Actions"。
+- **Chromium 实测**（无头 Playwright）：开机 16–30 ms；编码器、旋钮、按键、START 都能驱动固件菜单和音序器；音频线程负载几个百分点（`Date.now()` 只有毫秒精度，读数会跳）。
+
+这一阶段发现并修复的平台差异：
+
+- **浮点转整数**：FM/PWM 振荡器把负数和超过 2³² 的相位偏移转成 `uint32_t`。ARM 的 VCVT 会饱和（负数变 0，溢出取 0xFFFFFFFF），x86 回绕，WASM 默认返回 0，三者听起来都不一样。现在 `lxr_core` 用 `-fno-strict-float-cast-overflow` 编译，32 位转换按饱和规则来，和 ARM 一致；本机版和 WASM 版的输出逐样本相同。仍有一点不同：浮点直接转 16 位整数时，ARM 先饱和到 32 位再截断，clang 直接饱和到 16 位，只在数值超出 ±32767 时有差别。
+- **`CodecInit`**：`Soundengine.c` 带一个参数调用它，`AudioCodecManager.c` 的定义却没有参数。ARM 上没事，WASM 里这种调用会 trap。`AudioCodecManager.c`（声卡初始化和 DMA 缓冲区）已换成 `emu/platform.c` 里签名匹配的版本。
+- **`delay.c`** 里有 ARM 内联汇编，换成了 `hal_emu.c` 里的 `DWT_Delay_Init()`。
+
+还没做（下一步候选）：虚拟 SD 卡保存到浏览器（IndexedDB），刷新页面后工程不会丢；导入/导出真机 SD 卡；第二组输出（Out 2）；Web MIDI；参数编辑器和步进网格（P3）。

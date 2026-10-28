@@ -1,0 +1,68 @@
+# LXR-02 Emu (unofficial): build the firmware for the browser and publish
+# the web app on GitHub Pages.
+#
+# One-time setup in the repository: Settings > Pages > Build and deployment >
+# Source: "GitHub Actions".
+name: Emulator web app
+
+on:
+  push:
+    branches: [main, emu]
+    paths: ['Core/**', 'FATFS/**', 'Middlewares/**', 'emu/**', 'web/**', '.github/workflows/pages.yml']
+  pull_request:
+    paths: ['Core/**', 'FATFS/**', 'Middlewares/**', 'emu/**', 'web/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang, wasm-ld and wasi-libc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld wasi-libc libclang-rt-18-dev-wasm32 cmake
+
+      - name: Native build and self test
+        run: |
+          cmake -S emu -B build/emu -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/emu -j
+          ctest --test-dir build/emu --output-on-failure
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build WebAssembly module and web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run wasm
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
