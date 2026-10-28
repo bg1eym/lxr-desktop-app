@@ -1,3 +1,7 @@
+> **This branch adds LXR-02 Emu (unofficial)**: the firmware below running in the browser.
+> Try it at <https://bg1eym.github.io/lxr-desktop-app/>, read [emu/README.md](emu/README.md).
+> Not affiliated with or approved by Erica Synths.
+
 # LXR V2 firmware (desktop, STM32F765VG)
 
 Firmware for the LXR V2 desktop drum machine: an STM32F765 (Cortex-M7, 216 MHz) running the
