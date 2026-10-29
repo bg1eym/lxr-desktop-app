@@ -224,3 +224,11 @@ npm run dev       # 本地开发；npm run build 生成 dist/
 - **7(e) 商标**："Erica Synths"、"LXR"、"LXR-02" 不能用在让人以为来自 Erica Synths、或经其认可的地方；如实说明兼容性可以，例如 "custom firmware for the Erica Synths LXR-02"。网页和 README 都写了 "not affiliated with or approved by Erica Synths"。项目名 "LXR-02 Emu" 本身带商标，公开推广前最好换一个自己的名字（待 Qiang 决定）。
 - **GPL 源代码**：网页底部链接到构建所用的源代码（`emu` 分支）。
 - **硬件外观**：面板、外壳和工业设计不在 GPL 范围内，不能复制。网页面板是自己设计的通用布局，没有用 Erica Synths 的外观、logo 或面板印刷。
+
+### 界面语言
+
+网页默认英文；浏览器的第一语言是中文（`zh` 开头，简繁都算）时显示中文。右上角的语言按钮可以就地切换，不打断正在运行的模拟器；选择保存在 `localStorage`，存不了就每次按浏览器语言来。所有文字在 `web/src/i18n.ts`，目前只有英文和简体中文。
+
+### GitHub Pages 的设置
+
+Settings → Pages → Source 必须是 **GitHub Actions**。设成"Deploy from a branch"时，GitHub 会在每次推送时把分支原样发布（首页是 README），覆盖模拟器网页；2026-10-28 就因此让网址打开成了 README，被网友发现。改正后，每次更新都要打开线上页面确认。

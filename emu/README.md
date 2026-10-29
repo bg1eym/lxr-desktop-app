@@ -48,7 +48,9 @@ that only works on the device, see `docs/EMULATOR_PLAN.md`).
 
 ## Using it
 
-Click **开机** (power on). The panel works like the device:
+Click **Power on**. The page is in English, or in Chinese when that is your
+browser's first language; the button at the top right switches. The panel
+works like the device:
 
 - **Pots 1-4, DATA encoder:** drag up/down or use the mouse wheel. The DATA cap is the encoder's push button.
 - **Buttons:** pressed while held. Click SHIFT to latch it, click again to release.
@@ -57,9 +59,9 @@ Click **开机** (power on). The panel works like the device:
   PageUp/PageDown = page buttons, 1-7 = voices, Q-I and A-K = steps 1-16, Z/X/C/V = mode buttons.
 
 The virtual SD card is kept in the browser, so reloading the page or
-**重启** (reboot) keeps it. Like the device, the firmware writes the current kit
-and pattern to the card about 2 seconds after the last change. **清空 SD 卡**
-(erase card) wipes it and the firmware formats a new one.
+**Reboot** keeps it. Like the device, the firmware writes the current kit
+and pattern to the card about 2 seconds after the last change. **Erase SD card**
+wipes it and the firmware formats a new one.
 
 Not there yet: importing/exporting a real SD card, output 2, MIDI, a
 parameter/step editor.

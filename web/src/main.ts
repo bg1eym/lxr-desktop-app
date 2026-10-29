@@ -8,6 +8,7 @@ import './style.css';
 import { LxrEmu, type PanelState } from './emu';
 import { LcdView } from './lcd';
 import { Encoder, Fader, PanelButton, Pot, type ButtonOpts } from './controls';
+import { currentLang, onLang, setLang, t, text, type Key } from './i18n';
 
 /* Button and LED numbers: enum ButtonNumbers (Core/Inc/buttonHandler.h) and
  * the LED enum (Core/Inc/ledHandler.h) share the shift register layout. */
@@ -48,6 +49,7 @@ const lcd = new LcdView();
 
 const pots = [1, 2, 3, 4].map((i) => new Pot(`${i}`, (deg) => emu.pot(i - 1, deg)));
 const encoder = new Encoder((n) => emu.encoder(n), (d) => emu.encoderButton(d));
+onLang(() => encoder.setPushHint(t('encoderPush')));
 const faderNames = ['DRUM 1', 'DRUM 2', 'DRUM 3', 'SNARE', 'CYMBAL', 'HIHAT'];
 const faders = faderNames.map((name, i) => new Fader(name, (v) => emu.fader(i, v)));
 
@@ -71,7 +73,8 @@ const modes = h('div', 'group modes',
 const selects = h('div', 'group selects',
   ...selectNames.map((name, i) => button(BTN.select(i + 1), { label: `${i + 1}`, sub: name })));
 
-const shiftBtn = new PanelButton({ label: 'SHIFT', latch: true, key: 'Shift (按住) / 点击锁定' }, (d) => emu.button(BTN.SHIFT, d));
+const shiftBtn = new PanelButton({ label: 'SHIFT', latch: true }, (d) => emu.button(BTN.SHIFT, d));
+onLang(() => shiftBtn.setHint(t('shiftHint')));
 buttons.set(BTN.SHIFT, shiftBtn);
 const transport = h('div', 'group transport',
   shiftBtn.root,
@@ -88,17 +91,41 @@ for (let q = 0; q < 4; q++) {
   steps.append(quad);
 }
 
-const startBtn = h('button', 'power', '开机');
+const startBtn = text(h('button', 'power'), 'power');
 startBtn.type = 'button';
-const rebootBtn = h('button', 'tool', '重启');
+const rebootBtn = text(h('button', 'tool'), 'reboot');
 rebootBtn.type = 'button';
 rebootBtn.disabled = true;
-const eraseBtn = h('button', 'tool', '清空 SD 卡');
+const eraseBtn = text(h('button', 'tool'), 'erase');
 eraseBtn.type = 'button';
 eraseBtn.disabled = true;
-const status = h('span', 'status', '未启动');
-const card = h('span', 'status', '');
+const langBtn = h('button', 'tool lang');
+langBtn.type = 'button';
+onLang(() => {
+  langBtn.textContent = t('langButton');
+  langBtn.setAttribute('aria-label', t('langButtonLabel'));
+});
+langBtn.addEventListener('click', () => setLang(currentLang() === 'zh' ? 'en' : 'zh'));
+
+/* Status lines are kept as key + values, so they can be redrawn in the
+ * other language. */
+const status = h('span', 'status');
+const card = h('span', 'status');
 const load = h('span', 'status load', '');
+let statusText: [Key, Record<string, string | number>] = ['statusOff', {}];
+let cardText: [Key, Record<string, string | number>] | null = null;
+function setStatus(key: Key, vars: Record<string, string | number> = {}) {
+  statusText = [key, vars];
+  status.textContent = t(key, vars);
+}
+function setCard(key: Key, vars: Record<string, string | number> = {}) {
+  cardText = [key, vars];
+  card.textContent = t(key, vars);
+}
+onLang(() => {
+  status.textContent = t(...statusText);
+  if (cardText) card.textContent = t(...cardText);
+});
 
 const device = h('main', 'device',
   h('section', 'row top', screen, encArea, faderBank),
@@ -109,26 +136,25 @@ const device = h('main', 'device',
 const overlay = h('div', 'overlay',
   h('div', 'overlay-card',
     h('h2', '', 'LXR-02 Emu'),
-    h('p', '', '浏览器里运行的 LXR-02 1.7 固件。点“开机”启动音频。'),
+    text(h('p'), 'intro'),
     startBtn));
 
 document.querySelector('#app')!.append(
   h('header', 'bar',
     h('div', 'brand', h('strong', '', 'LXR-02 Emu'), h('span', 'tag', 'unofficial')),
-    h('div', 'tools', rebootBtn, eraseBtn, status, card, load)),
+    h('div', 'tools', rebootBtn, eraseBtn, status, card, load, langBtn)),
   h('div', 'stage', device, overlay),
   h('section', 'help',
-    h('h3', '', '操作'),
+    text(h('h3'), 'helpTitle'),
     h('ul', '',
-      h('li', '', '旋钮 1–4、DATA 编码器：上下拖动或滚轮；DATA 中间的圆钮是按压。'),
-      h('li', '', '按键：按住即按下，松开即抬起。SHIFT 可以点击锁定，再点一次松开。'),
-      h('li', '', 'SD 卡保存在浏览器里，刷新页面或“重启”都不会丢。固件会在你停手约 2 秒后把当前 kit 和 pattern 自动存到卡上（和真机一样）；要长期保存，用 SAVE 存进工程。'),
-      h('li', '', '键盘：Space = START/STOP，Shift = SHIFT，←/→ = DATA，Enter = 按 DATA，PageUp/PageDown = 翻页，1–7 = 声部，Q–I / A–K = 步 1–16，Z/X/C/V = 模式键。'))),
+      text(h('li'), 'helpKnobs'),
+      text(h('li'), 'helpButtons'),
+      text(h('li'), 'helpCard'),
+      text(h('li'), 'helpKeys'))),
   h('footer', 'foot',
-    '非官方项目，与 Erica Synths 无关，也未经其认可。运行的是 Erica Synths LXR-02 开源固件 1.7 的修改版（GPL-3.0），声音由固件代码实时生成。',
-    h('br'),
-    'Unofficial emulator for the Erica Synths LXR-02 firmware; not affiliated with or approved by Erica Synths. ',
-    Object.assign(h('a', '', '源代码 / Source (GPL-3.0)'), { href: SOURCE_URL })));
+    text(h('span'), 'footer'),
+    ' ',
+    Object.assign(text(h('a'), 'source'), { href: SOURCE_URL })));
 
 /* ---- device state -------------------------------------------------------- */
 emu.onState = (s: PanelState) => {
@@ -141,24 +167,25 @@ emu.onState = (s: PanelState) => {
 emu.onLoad = (l) => { load.textContent = `DSP ≈ ${(l * 100).toFixed(1)}%`; };
 emu.onCard = (bytes, persistent) => {
   const mb = (bytes / 1048576).toFixed(1);
-  card.textContent = persistent ? `SD 卡 ${mb} MB · 已存到浏览器` : 'SD 卡不会保存（浏览器禁止了本地存储）';
+  if (persistent) setCard('cardSaved', { mb });
+  else setCard('cardNotKept');
 };
 
 async function power(how: 'start' | 'reboot' | 'erase') {
   startBtn.disabled = true;
   rebootBtn.disabled = true;
   eraseBtn.disabled = true;
-  status.textContent = '启动中…';
+  setStatus('statusStarting');
   try {
     const { bootMs } = how === 'start' ? await emu.start() : how === 'reboot' ? await emu.reboot() : await emu.eraseCardAndReboot();
-    status.textContent = `运行中 · ${emu.sampleRate} Hz · 开机 ${bootMs} ms`;
+    setStatus('statusRunning', { rate: emu.sampleRate, ms: bootMs });
     emu.onCard(emu.card.size, emu.card.persistent);
     overlay.hidden = true;
     device.classList.add('live');
     rebootBtn.disabled = false;
     eraseBtn.disabled = false;
   } catch (err) {
-    status.textContent = `出错：${(err as Error).message}`;
+    setStatus('statusError', { msg: (err as Error).message });
     startBtn.disabled = false;
     console.error(err);
   }
@@ -166,7 +193,7 @@ async function power(how: 'start' | 'reboot' | 'erase') {
 startBtn.addEventListener('click', () => power('start'));
 rebootBtn.addEventListener('click', () => power('reboot'));
 eraseBtn.addEventListener('click', () => {
-  if (confirm('清空虚拟 SD 卡？卡上所有工程、kit 和 pattern 都会删除，固件会重新格式化一张空卡。')) power('erase');
+  if (confirm(t('eraseConfirm'))) power('erase');
 });
 // Leaving the page: hand over what the firmware wrote since the last sync.
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') emu.syncCard(); });

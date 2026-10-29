@@ -28,6 +28,7 @@ export class PanelButton {
   private led: HTMLSpanElement | null = null;
   private btn: HTMLButtonElement;
   private down = false;
+  private label: string;
 
   constructor(opts: ButtonOpts, private onChange: (down: boolean) => void) {
     this.root = el('div', `pbtn ${opts.cls ?? ''}`);
@@ -38,7 +39,8 @@ export class PanelButton {
     this.btn = el('button', 'cap');
     this.btn.type = 'button';
     this.btn.setAttribute('aria-label', opts.sub ? `${opts.label} (${opts.sub})` : opts.label);
-    if (opts.key) this.btn.title = `${opts.label} — ${opts.key}`;
+    this.label = opts.label;
+    if (opts.key) this.setHint(opts.key);
     this.root.append(this.btn);
     const lab = el('div', 'plabel', opts.label);
     if (opts.sub) lab.append(el('span', 'psub', opts.sub));
@@ -74,6 +76,11 @@ export class PanelButton {
 
   setLed(on: boolean) {
     this.led?.classList.toggle('on', on);
+  }
+
+  /** Keyboard hint shown on hover. */
+  setHint(key: string) {
+    this.btn.title = `${this.label} — ${key}`;
   }
 }
 
@@ -139,6 +146,7 @@ export class Encoder {
   private angle = 0;
   private dial: HTMLDivElement;
   private acc = 0;
+  private cap: HTMLButtonElement;
 
   constructor(private onTurn: (detents: number) => void, private onPush: (down: boolean) => void) {
     this.root = el('div', 'encoder');
@@ -150,7 +158,7 @@ export class Encoder {
     const cap = el('button', 'push');
     cap.type = 'button';
     cap.setAttribute('aria-label', 'Encoder push');
-    cap.title = '按下编码器 — Enter';
+    this.cap = cap;
     ring.append(this.dial, cap);
     this.root.append(ring, el('div', 'plabel', 'DATA'));
 
@@ -182,6 +190,11 @@ export class Encoder {
     const up = () => { if (cap.classList.contains('down')) { cap.classList.remove('down'); this.onPush(false); } };
     cap.addEventListener('pointerup', up);
     cap.addEventListener('lostpointercapture', up);
+  }
+
+  /** Hover text of the push button. */
+  setPushHint(text: string) {
+    this.cap.title = text;
   }
 
   turn(detents: number) {
