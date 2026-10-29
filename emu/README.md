@@ -67,8 +67,6 @@ pattern data, so the panel, the display and the SD card see the same thing.
   every 8th, offbeats, every 16th), shifting, humanizing velocity, copy/paste and clear.
 - **Lane:** draw velocity, probability, retrig, nudge or note for the selected
   track; double-click resets a step.
-- **Inspector:** everything about the selected steps; several steps can be
-  edited at once.
 - **Toolbar:** play/stop, BPM (type, scroll or tap), swing, pattern A1–D16,
   save, undo/redo (⌘Z, ⇧⌘Z). The strip above the grid shows all 4 bars; click
   one to show it, or let **Follow** track the playhead.
@@ -78,6 +76,24 @@ pattern data, so the panel, the display and the SD card see the same thing.
   it behaves like the device. **Save** (⌘S) does what SAVE does on the device.
 - **Keys with the grid focused:** arrows move, Shift+arrows extend, Enter switches,
   Delete clears, ⌘C/⌘V copy and paste steps, ⌘A selects the bar.
+
+### Sound
+
+The panel to the right of the grid edits the voice of the selected track
+(click a track name or one of its steps).
+
+- **Pages 1–8:** OSC, AEG, MOD, FM, TRANS, FILTER, LFO and MIX, the pages the
+  device's select buttons 1–8 open. Every sound parameter of the page is
+  there, with the firmware's own ranges and value names: sliders for values,
+  buttons or lists for waveforms, filter types, sync rates and modulation targets.
+- **Display:** shows the page the way the device's screen does: the
+  parameters' 3-letter names over their values, and the full name while you
+  change one.
+- Selecting a track also selects the voice on the panel, so the device's
+  screen and knobs show the same voice (not in copy, mute or performance mode,
+  where the voice buttons do something else).
+- Changes go into the current kit, which the firmware saves to the card
+  2 seconds later, as on the device; SAVE it on the panel to keep it in a kit slot.
 
 ### Panel
 
@@ -114,7 +130,7 @@ with the card. Export, import and export again gives byte-identical files.
 Not yet tried with a real LXR-02: please report if the device doesn't load an
 exported card.
 
-Not there yet: output 2, MIDI, a sound editor, editing parameter locks.
+Not there yet: output 2, MIDI, editing parameter locks, saving kits from the page.
 
 ## Building
 
@@ -147,7 +163,8 @@ npm run dev     # or: npm run build
 - `emu/api.c`, `emu/lxr_api.h` C API, exported to JavaScript
 - `emu/cli/` command line tool
 - `emu/seq_api.c` pattern data for the sequencer editor
-- `web/` the page: `public/lxr-processor.js` (AudioWorklet), `src/` (panel, display, SD card storage), `src/seq/` (sequencer editor)
+- `emu/param_api.c` the firmware's sound menus as JSON, for the sound panel (`lxr_cli describe` prints them)
+- `web/` the page: `public/lxr-processor.js` (AudioWorklet), `src/` (panel, display, SD card storage), `src/seq/` (sequencer editor), `src/sound/` (sound panel)
 - `docs/EMULATOR_PLAN.md` design notes and findings (in Chinese)
 
 ## License
