@@ -19,6 +19,8 @@
 #include "menu/menu.h"
 #include "menu/CcNr2Text.h"
 #include "Parameters.h"
+#include "Preset/InitKit.h"
+#include "lxr_api.h"
 
 #ifdef __wasm__
 #define API __attribute__((visibility("default"), used))
@@ -223,6 +225,33 @@ API const char *lxr_ui_describe(void)
 	putf("],\"lfoVoice\":%d,\"sound\":%d}", PAR_VOICE_LFO1, END_OF_SOUND_PARAMETERS);
 	json[jlen] = 0;
 	return json;
+}
+
+/* Put a voice's sound back to the init kit (Preset/initKit.c, the sound of
+ * a new project): every parameter on the voice's menu pages, set as a knob
+ * would set it. The mod targets go last, because a new LFO voice moves the
+ * LFO's target. Returns how many parameters were set. */
+API int lxr_reset_voice(uint8_t voice)
+{
+	if (voice > VOICE7_PAGE) return 0;
+	int n = 0;
+	for (int targets = 0; targets < 2; targets++) {
+		for (int s = 0; s < NUM_SUB_PAGES; s++) {
+			const Page *pg = &menuPages[voice][s];
+			for (int k = 0; k < 8; k++) {
+				const uint16_t p = (&pg->bot1)[k];
+				if ((&pg->top1)[k] == TEXT_EMPTY || p == PAR_NONE || p >= END_OF_SOUND_PARAMETERS ||
+				    p + 8 >= INIT_KIT_SIZE)
+					continue;
+				const uint8_t type = (uint8_t)(parameter_dtypes[p] & 0xff);
+				const int is_target = type == DTYPE_TARGET_SELECTION_VELO || type == DTYPE_TARGET_SELECTION_LFO;
+				if (is_target != targets) continue;
+				lxr_set_param(p, initKit[p + 8]);   /* a kit file: 8 name bytes, then the parameters */
+				n++;
+			}
+		}
+	}
+	return n;
 }
 
 /* All parameters, for watching them change. */

@@ -103,6 +103,7 @@ export class SoundEditor {
   private controls: Control[] = [];
   private title = el('h3', 'snd-title');
   private preview = btn('seq-tool snd-preview', '');
+  private reset = btn('seq-tool snd-reset', '↺');
   private hide = btn('seq-tool snd-hide', '×');
   /** The panel's hide button was clicked. */
   onHide: () => void = () => {};
@@ -114,10 +115,15 @@ export class SoundEditor {
   constructor(private emu: LxrEmu) {
     onLang(() => this.root.setAttribute('aria-label', t('ariaSound')));
     this.preview.addEventListener('click', () => this.emu.trigger(this.voice, 110));
+    this.reset.addEventListener('click', () => {
+      if (confirm(t('sndResetConfirm', { voice: TRACK_NAMES[this.voice] }))) this.emu.resetVoice(this.voice);
+    });
     this.hide.addEventListener('click', () => this.onHide());
     onLang(() => {
       this.hide.title = t('sndHide');
       this.hide.setAttribute('aria-label', t('sndHide'));
+      this.reset.title = t('sndResetHint');
+      this.reset.setAttribute('aria-label', t('sndReset'));
     });
     const tabs = el('div', 'snd-tabs');
     PAGES.forEach(([name], i) => {
@@ -133,7 +139,7 @@ export class SoundEditor {
       tabs.append(b);
     });
     this.root.append(
-      el('div', 'snd-head', el('span', 'seq-swatch'), this.title, this.preview, this.hide),
+      el('div', 'snd-head', el('span', 'seq-swatch'), this.title, this.preview, this.reset, this.hide),
       el('div', 'snd-lcd lcd-bezel', this.lcd.canvas),
       tabs, this.body, this.hintText);
     onLang(() => this.build());
@@ -304,6 +310,7 @@ export class SoundEditor {
     this.root.style.setProperty('--c', TRACK_COLORS[tr]);
     this.preview.textContent = t('sndPreview');
     this.preview.disabled = !this.live;
+    this.reset.disabled = !this.live;
     this.hintText.textContent = t('sndHint');
     this.tabs.forEach((b, i) => {
       b.title = t(PAGES[i][1]);

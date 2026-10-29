@@ -365,6 +365,7 @@ canvas.lcd { display: block; width: 420px; max-width: 100%; height: auto; image-
 .snd-title { flex: 1; margin: 0; font-size: 13px; letter-spacing: 0.04em; color: var(--c); }
 .snd-preview { padding: 3px 9px; font-size: 12px; }
 .snd-hide { padding: 1px 8px; font-size: 15px; line-height: 1.2; }
+.snd-reset { padding: 1px 8px; font-size: 14px; line-height: 1.2; }
 .snd-lcd { padding: 8px; }
 .snd-lcd canvas.lcd { width: 100%; }
 .snd-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }

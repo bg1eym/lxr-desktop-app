@@ -28,6 +28,7 @@ type Msg =
   | { t: 'jacks'; m: number }
   | { t: 'param'; i: number; v: number; id?: number }
   | { t: 'selectVoice'; voice: number }
+  | { t: 'resetVoice'; voice: number }
   | { t: 'describe' }
   | { t: 'midi'; data: number[] }
   | { t: 'seqView'; pattern: number }
@@ -327,6 +328,8 @@ export class LxrEmu {
   }
   /** Make a voice the panel's active one, where its voice button would just select it. */
   selectVoice(voice: number) { this.send({ t: 'selectVoice', voice }); }
+  /** Put the voice's sound back to the init kit. */
+  resetVoice(voice: number) { this.send({ t: 'resetVoice', voice }); }
   /** The firmware's sound menus (emu/param_api.c), as JSON. */
   describe(): Promise<string> {
     if (!this.node) return Promise.reject(new Error('not running'));

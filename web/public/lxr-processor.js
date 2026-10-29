@@ -142,6 +142,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 			if (m.id) { this.paramAck = m.id; this.checkParams(true); }
 			break;
 		case 'selectVoice': x.lxr_select_voice(m.voice); break;
+		case 'resetVoice': x.lxr_reset_voice(m.voice); this.checkParams(true); break;
 		case 'describe': {
 			const p = x.lxr_ui_describe();
 			const mem = new Uint8Array(x.memory.buffer);
