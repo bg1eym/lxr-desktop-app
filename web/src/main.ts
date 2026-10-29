@@ -187,6 +187,7 @@ emu.onState = (s: PanelState) => {
     b.setLed(on === 1);
   }
   seq.setTransport(s.playheads, s.run !== 0);
+  playing = s.run !== 0;
 };
 emu.onSeq = (d, ack) => seq.setData(d, ack);
 emu.onParams = (v, ack) => sound.setParams(v, ack);
@@ -207,7 +208,8 @@ async function power(how: 'start' | 'reboot' | 'erase') {
   setStatus('statusStarting');
   try {
     const { bootMs } = how === 'start' ? await emu.start() : how === 'reboot' ? await emu.reboot() : await emu.eraseCardAndReboot();
-    setStatus('statusRunning', { rate: emu.sampleRate, ms: bootMs });
+    lastBoot = { rate: emu.sampleRate, ms: bootMs };
+    setStatus('statusRunning', lastBoot);
     emu.onCard(emu.card.size, emu.card.persistent);
     overlay.hidden = true;
     device.classList.add('live');
@@ -230,14 +232,54 @@ eraseBtn.addEventListener('click', () => {
   if (confirm(t('eraseConfirm'))) power('erase');
 });
 const sdDialog = cardDialog(emu, (bootMs) => {
-  setStatus('statusRunning', { rate: emu.sampleRate, ms: bootMs });
+  lastBoot = { rate: emu.sampleRate, ms: bootMs };
+  setStatus('statusRunning', lastBoot);
   sound.load();   // the samples on the new card are in the waveform menus
 });
 document.body.append(sdDialog);
 cardBtn.addEventListener('click', () => sdDialog.showModal());
 
-// Leaving the page: hand over what the firmware wrote since the last sync.
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') emu.syncCard(); });
+/* Power saving, and the computer going to sleep. With nothing playing, the
+ * emulator pauses after 10 minutes without input, or after 5 minutes in the
+ * background, so that it is not running when the computer sleeps; a click
+ * or a key goes on where it was (the device's time follows the rendered
+ * samples). When the browser stopped the audio by itself, for example while
+ * the computer slept, the same brings it back. Leaving the page also hands
+ * over what the firmware wrote to the card since the last sync. */
+const IDLE_PAUSE_MS = 10 * 60 * 1000;
+const HIDDEN_PAUSE_MS = 5 * 60 * 1000;
+let lastInput = performance.now();
+let hiddenSince = 0;
+let playing = false;
+let autoPaused = false;
+let lastBoot: Record<string, number> = {};
+function wake() {
+  lastInput = performance.now();
+  emu.resume().then(() => {
+    if (autoPaused && emu.running) {
+      autoPaused = false;
+      setStatus('statusRunning', lastBoot);
+    }
+  });
+}
+for (const type of ['pointerdown', 'keydown', 'wheel']) window.addEventListener(type, wake, { capture: true, passive: true });
+setInterval(() => {
+  if (!emu.running || playing) return;
+  const now = performance.now();
+  const hiddenLong = document.visibilityState === 'hidden' && now - hiddenSince > HIDDEN_PAUSE_MS;
+  if (!hiddenLong && now - lastInput < IDLE_PAUSE_MS) return;
+  autoPaused = true;
+  setStatus('statusPaused');
+  emu.pause();
+}, 30 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    hiddenSince = performance.now();
+    emu.syncCard();
+  } else {
+    wake();
+  }
+});
 
 /* ---- keyboard ------------------------------------------------------------- */
 const keyButtons: Record<string, number> = {

@@ -56,6 +56,16 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.seqAck = 0;         /* id of the last sequencer edit done, counted by the page */
 		this.paramAck = 0;       /* the same for parameter changes */
 		this.lastParams = null;
+		/* Flow control: one message of each kind at a time, until the page
+		 * says it has it. When the page is frozen or throttled (in the
+		 * background, display off, the computer going to sleep) the audio
+		 * thread keeps running; without this, hours of display updates
+		 * would queue up and arrive at once. What changed in between is sent
+		 * when the page answers: the newest display state, pattern data and
+		 * parameters, and the card chunks, which stay marked as written. */
+		this.busy = { state: false, seq: false, params: false, sd: false, load: false };
+		this.forceSeq = false;
+		this.forceParams = false;
 		this.port.onmessage = (e) => {
 			if (this.x) this.handle(e.data); else this.pending.push(e.data);
 		};
@@ -119,6 +129,12 @@ class LxrProcessor extends AudioWorkletProcessor {
 		}
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
 		case 'syncSd': this.syncSd(m.id); break;
+		case 'ack':
+			this.busy[m.k] = false;
+			if (m.k === 'state') this.postState();
+			else if (m.k === 'seq') this.checkSeq();
+			else if (m.k === 'params') this.checkParams();
+			break;
 		case 'seqView': this.seqView = m.pattern; this.lastSeq = null; break;
 		case 'seq': this.seqEdit(m); break;
 		case 'trigger': x.lxr_trigger(m.voice, m.velocity); break;
@@ -182,6 +198,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 	 * stores them. With an id, always answer, so the page knows it has
 	 * everything (before a reboot). */
 	syncSd(id) {
+		if (id === undefined && this.busy.sd) return;
 		const x = this.x;
 		const size = x.lxr_sd_chunk_size();
 		const chunks = [];
@@ -189,6 +206,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 			chunks.push([c, new Uint8Array(x.memory.buffer, x.lxr_sd_chunk(c), size).slice().buffer]);
 		}
 		if (chunks.length || id !== undefined) {
+			this.busy.sd = true;
 			this.port.postMessage({ t: 'sd', id, chunks }, chunks.map((c) => c[1]));
 		}
 	}
@@ -212,28 +230,34 @@ class LxrProcessor extends AudioWorkletProcessor {
 	/* Send all parameter values when one changed: knobs on the panel, a
 	 * kit load or the page. */
 	checkParams(force) {
+		if (force) this.forceParams = true;
+		if (this.busy.params) return;
 		const x = this.x;
 		const n = x.lxr_num_params();
 		const v = new Uint8Array(x.memory.buffer, x.lxr_params(), n);
 		const last = this.lastParams;
-		if (last && !force) {
+		if (last && !this.forceParams) {
 			let same = true;
 			for (let i = 0; i < n; i++) if (v[i] !== last[i]) { same = false; break; }
 			if (same) return;
 		}
 		this.lastParams = v.slice();
 		const out = v.slice();
+		this.forceParams = false;
+		this.busy.params = true;
 		this.port.postMessage({ t: 'params', v: out, ack: this.paramAck }, [out.buffer]);
 	}
 
 	/* Send the shown pattern's data when it changed (edits from the page, the
 	 * virtual panel or MIDI all end up here). */
 	checkSeq(force) {
+		if (force) this.forceSeq = true;
+		if (this.busy.seq) return;
 		const x = this.x;
 		const size = x.lxr_seq_snapshot_size();
 		const snap = new Uint8Array(x.memory.buffer, x.lxr_seq_snapshot(this.seqView), size);
 		const last = this.lastSeq;
-		if (last && !force) {
+		if (last && !this.forceSeq) {
 			let same = true;
 			for (let i = 0; i < size; i++) if (snap[i] !== last[i]) { same = false; break; }
 			if (same) return;
@@ -241,10 +265,13 @@ class LxrProcessor extends AudioWorkletProcessor {
 		const copy = snap.slice();
 		this.lastSeq = copy;
 		const out = copy.slice();
+		this.forceSeq = false;
+		this.busy.seq = true;
 		this.port.postMessage({ t: 'seq', data: out, ack: this.seqAck }, [out.buffer]);
 	}
 
 	postState() {
+		if (this.busy.state) return;
 		const x = this.x;
 		const mem = x.memory.buffer;
 		const lcdBytes = new Uint8Array(mem, x.lxr_get_lcd(), 32);
@@ -261,6 +288,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		if (lcd === l.lcd && cg === l.cg && st === l.st && lo === l.lo && hi === l.hi && run === l.run && heads === l.heads) return;
 		this.last = { lcd, cg, st, lo, hi, run, heads };
 		const playheads = Array.from(heads, (c) => c.charCodeAt(0) - 32);
+		this.busy.state = true;
 		this.port.postMessage({ t: 'state', lcd: lcdBytes.slice(), cg: cgBytes.slice(), st, lo, hi, run, playheads });
 	}
 
@@ -280,7 +308,9 @@ class LxrProcessor extends AudioWorkletProcessor {
 			if (nch >= 2) out[1][i] = buf[o + 1];
 			if (nch >= 4) { out[2][i] = buf[o + 2]; out[3][i] = buf[o + 3]; }
 		}
-		this.renderMs += Date.now() - t0;
+		/* at most one quantum's worth: a computer waking from sleep in the
+		 * middle of a render is not load */
+		this.renderMs += Math.min(Date.now() - t0, 10);
 		this.renderQuanta++;
 
 		if (++this.quanta % STATE_EVERY === 0) this.postState();
@@ -289,7 +319,10 @@ class LxrProcessor extends AudioWorkletProcessor {
 		if (this.quanta % SEQ_EVERY === 4) this.checkParams();
 		if (this.renderQuanta >= 1034) {   /* about every 3 s: Date.now() only has 1 ms steps */
 			const audioMs = this.renderQuanta * QUANTUM / sampleRate * 1000;
-			this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });
+			if (!this.busy.load) {
+				this.busy.load = true;
+				this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });
+			}
 			this.renderMs = 0;
 			this.renderQuanta = 0;
 		}

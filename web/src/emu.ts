@@ -32,7 +32,8 @@ type Msg =
   | { t: 'midi'; data: number[] }
   | { t: 'seqView'; pattern: number }
   | ({ t: 'seq'; id: number } & SeqEdit)
-  | { t: 'trigger'; voice: number; velocity: number };
+  | { t: 'trigger'; voice: number; velocity: number }
+  | { t: 'ack'; k: string };
 
 /** Changes to the pattern data, done in this order. */
 export interface SeqEdit {
@@ -163,6 +164,21 @@ export class LxrEmu {
     });
   }
 
+  /** Stop the audio clock, which pauses the emulated device; resume() goes on
+   * where it was (the device's time follows the rendered samples). */
+  async pause(): Promise<void> {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    await this.syncCard();
+    await this.ctx.suspend();
+  }
+
+  /** Start the audio clock again, after pause() or when the browser stopped
+   * it (for example while the computer slept). */
+  async resume(): Promise<void> {
+    if (!this.ctx || !this.node || this.ctx.state === 'running' || this.ctx.state === 'closed') return;
+    try { await this.ctx.resume(); } catch { /* needs a click on the page; tried again then */ }
+  }
+
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 0;
   }
@@ -202,6 +218,10 @@ export class LxrEmu {
     return new Promise((resolve, reject) => {
       node.port.onmessage = (e: MessageEvent) => {
         const m = e.data;
+        // flow control: the worklet sends the next one of these when it hears back
+        if (m.t === 'state' || m.t === 'seq' || m.t === 'params' || m.t === 'sd' || m.t === 'load') {
+          node.port.postMessage({ t: 'ack', k: m.t });
+        }
         switch (m.t) {
           case 'ready':
             this.faders.forEach((v, i) => this.send({ t: 'fader', i, v }));
