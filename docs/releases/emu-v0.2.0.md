@@ -70,6 +70,10 @@ pattern and kit.
   goes to sleep. A click or a key goes on where it was. This is meant to help with the browser
   freezing or crashing after the computer slept, which came up in testing. The cause is not
   confirmed yet; please report if it still happens.
+- **Recovery:** if the audio stops while the page is shown (for example after the computer slept),
+  the emulator starts it again by itself, rebooting from the SD card if needed. If the firmware stops
+  with an error, the status line says so and **Reboot** brings it back, instead of a page that just
+  stops.
 
 ### Upgrading
 
@@ -142,6 +146,7 @@ is kept, with the patterns and kits you made before.
 - 改变 LFO 的目标声部时，调制目标会换成新声部上的同一个参数，和真机菜单的做法一样。
 - 页面底部显示版本号。
 - **省电**：没有播放时，10 分钟没有鼠标或键盘操作，或者页面在后台放了 5 分钟，模拟器会暂停，这样电脑休眠时它不在运行。点击页面或按任意键就从原处继续。这是为了解决测试中遇到的电脑休眠后浏览器卡死或崩溃的问题，原因还没有确认；如果还会发生，请告诉我。
+- **自动恢复**：页面显示时如果音频停了（例如电脑休眠之后），模拟器会自己重新启动音频，必要时从 SD 卡重新开机。固件出错停止时，状态栏会显示错误，点“重启”即可恢复，不会再停在一个没反应的页面上。
 
 ### 如何升级
 
