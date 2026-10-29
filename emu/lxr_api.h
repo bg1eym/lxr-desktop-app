@@ -31,6 +31,23 @@ const uint8_t *lxr_sd_chunk(uint32_t c);
 uint8_t *lxr_sd_chunk_for_load(uint32_t c);
 int32_t lxr_sd_take_dirty(void);
 
+/* Files on the card, through the firmware's FatFs. Export while running:
+ * lxr_card_scan() lists every file and directory (breadth first), and
+ * lxr_card_entry_read() reads one into lxr_card_buffer(). Import between
+ * lxr_sd_create() and lxr_boot(): lxr_card_import_begin() formats the card,
+ * then each lxr_card_import_file() writes lxr_card_buffer() to the path in
+ * lxr_card_path_buffer(), and lxr_card_import_end() finishes. */
+uint8_t *lxr_card_buffer(uint32_t size);
+char *lxr_card_path_buffer(void);
+int lxr_card_scan(void);
+const char *lxr_card_entry_path(int i);
+uint32_t lxr_card_entry_size(int i);
+int lxr_card_entry_is_dir(int i);
+int32_t lxr_card_entry_read(int i);
+int lxr_card_import_begin(void);
+int lxr_card_import_file(uint32_t len, int is_dir);
+int lxr_card_import_end(void);
+
 /* Interleaved output, channels = 2 (out 1) or 4 (out 1 L/R, out 2 L/R). */
 int lxr_render(float *out, int frames, int channels);
 int lxr_render_i16(int16_t *out, int frames, int channels);

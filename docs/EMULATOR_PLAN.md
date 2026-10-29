@@ -232,3 +232,20 @@ npm run dev       # 本地开发；npm run build 生成 dist/
 ### GitHub Pages 的设置
 
 Settings → Pages → Source 必须是 **GitHub Actions**。设成"Deploy from a branch"时，GitHub 会在每次推送时把分支原样发布（首页是 README），覆盖模拟器网页；2026-10-28 就因此让网址打开成了 README，被网友发现。改正后，每次更新都要打开线上页面确认。
+
+### SD 卡导入/导出 —— 已完成（P1 的往返部分）
+
+- `emu/card_io.c`：全部经过固件自己的 FatFs。
+  - **导出**：在固件运行时、两次渲染之间进行，在固件挂载的卷上按广度优先列出所有文件和目录，再逐个读出。只用绝对路径，不动固件的当前目录。
+  - **导入**：在开机前进行。先按固件格式化例程的参数（`FM_FAT32`，簇大小用默认值）格式化，再逐个写入文件，然后开机。
+- 网页上的"SD 卡…"对话框（`web/src/cardDialog.ts`、`cardFiles.ts`）：
+  - 导出到文件夹：用 File System Access API，可以直接选中 Mac 上插着的 SD 卡；同名文件覆盖，其他文件保留。
+  - 下载 zip：zip 用的是自己写的 store 格式和 CRC32。
+  - 从文件夹或 zip 导入：zip 支持 store 和 deflate（解压用浏览器的 `DecompressionStream`）。外层只有一个文件夹时，把它当成卡的根目录；`__MACOSX`、`.DS_Store`、`System Volume Information` 等会被跳过。导入会替换整张虚拟卡，并清掉浏览器里存的旧卡。
+- 新建虚拟卡的容量改成 256 MB。卡是稀疏的，空间用到才分配；以前格式化的卡还是原来的文件系统大小。
+- 格式化加开机后，卡上有：`/GLO.CFG`、`/PROJ.IDX`、`/PROJ00/`（`PRJ.NFO`、`GLO.CFG`，以及 64 组 `NN-.SND`/`.PAT`/`.SNG`，第 0 组 kit 叫 `00-INITK.SND`）、`/TMP/`（自动存盘的 `TMP.SND`、`TMP.PAT`）。
+- 测试（Node 和 Chromium）：
+  - 导出、导入、再导出：Node 里 200 个条目、Chromium 里 199 个，逐字节相同，步和参数也都还原；
+  - 写入文件夹再读回（用浏览器的私有文件系统测）：结果一致；
+  - Finder 风格的 zip 导入正常。
+- 还没做：用 Qiang 真机 SD 卡的拷贝做往返测试；把导出的卡插回真机验证能否读取。

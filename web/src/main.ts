@@ -9,6 +9,8 @@ import { LxrEmu, type PanelState } from './emu';
 import { LcdView } from './lcd';
 import { Encoder, Fader, PanelButton, Pot, type ButtonOpts } from './controls';
 import { currentLang, onLang, setLang, t, text, type Key } from './i18n';
+import { cardDialog } from './cardDialog';
+import { makeZip, readFolder, readZip, writeFolder } from './cardFiles';
 
 /* Button and LED numbers: enum ButtonNumbers (Core/Inc/buttonHandler.h) and
  * the LED enum (Core/Inc/ledHandler.h) share the shift register layout. */
@@ -99,6 +101,9 @@ rebootBtn.disabled = true;
 const eraseBtn = text(h('button', 'tool'), 'erase');
 eraseBtn.type = 'button';
 eraseBtn.disabled = true;
+const cardBtn = text(h('button', 'tool'), 'cardButton');
+cardBtn.type = 'button';
+cardBtn.disabled = true;
 const langBtn = h('button', 'tool lang');
 langBtn.type = 'button';
 onLang(() => {
@@ -142,7 +147,8 @@ const overlay = h('div', 'overlay',
 document.querySelector('#app')!.append(
   h('header', 'bar',
     h('div', 'brand', h('strong', '', 'LXR-02 Emu'), h('span', 'tag', 'unofficial')),
-    h('div', 'tools', rebootBtn, eraseBtn, status, card, load, langBtn)),
+    h('div', 'tools', cardBtn, rebootBtn, eraseBtn, langBtn)),
+  h('div', 'statusbar', status, card, load),
   h('div', 'stage', device, overlay),
   h('section', 'help',
     text(h('h3'), 'helpTitle'),
@@ -175,6 +181,7 @@ async function power(how: 'start' | 'reboot' | 'erase') {
   startBtn.disabled = true;
   rebootBtn.disabled = true;
   eraseBtn.disabled = true;
+  cardBtn.disabled = true;
   setStatus('statusStarting');
   try {
     const { bootMs } = how === 'start' ? await emu.start() : how === 'reboot' ? await emu.reboot() : await emu.eraseCardAndReboot();
@@ -184,6 +191,7 @@ async function power(how: 'start' | 'reboot' | 'erase') {
     device.classList.add('live');
     rebootBtn.disabled = false;
     eraseBtn.disabled = false;
+    cardBtn.disabled = false;
   } catch (err) {
     setStatus('statusError', { msg: (err as Error).message });
     startBtn.disabled = false;
@@ -195,6 +203,12 @@ rebootBtn.addEventListener('click', () => power('reboot'));
 eraseBtn.addEventListener('click', () => {
   if (confirm(t('eraseConfirm'))) power('erase');
 });
+const sdDialog = cardDialog(emu, (bootMs) => {
+  setStatus('statusRunning', { rate: emu.sampleRate, ms: bootMs });
+});
+document.body.append(sdDialog);
+cardBtn.addEventListener('click', () => sdDialog.showModal());
+
 // Leaving the page: hand over what the firmware wrote since the last sync.
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') emu.syncCard(); });
 
@@ -233,4 +247,4 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => shiftBtn.set(false));
 
 // for automated checks
-(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN };
+(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN, cardFiles: { readFolder, writeFolder, makeZip, readZip } };

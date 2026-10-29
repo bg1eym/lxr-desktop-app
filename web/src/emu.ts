@@ -29,9 +29,12 @@ type Msg =
   | { t: 'midi'; data: number[] };
 
 import { SdStore, type Chunk } from './sdStore';
+import type { CardFile } from './cardFiles';
 
 const BASE = import.meta.env.BASE_URL;
-const SD_MEGABYTES = 64;
+/* Size of the virtual card. A card formatted earlier keeps its own file
+ * system size; the card is sparse, so only written chunks take memory. */
+const SD_MEGABYTES = 256;
 
 export class LxrEmu {
   onState: (s: PanelState) => void = () => {};
@@ -47,6 +50,7 @@ export class LxrEmu {
   private faders = [1, 1, 1, 1, 1, 1];
   private syncId = 0;
   private syncWaiters = new Map<number, () => void>();
+  private exportWaiters = new Map<number, (m: { files?: [string, boolean, ArrayBuffer | null][]; error?: string }) => void>();
   private cardLoaded = false;
 
   /** Start audio and boot the device. Call from a user gesture. */
@@ -84,6 +88,33 @@ export class LxrEmu {
     return this.boot();
   }
 
+  /** Every file and directory on the virtual card, as the firmware's FatFs sees it. */
+  async exportCard(): Promise<CardFile[]> {
+    if (!this.node) throw new Error('not running');
+    await this.syncCard();
+    const id = ++this.syncId;
+    const m = await new Promise<{ files?: [string, boolean, ArrayBuffer | null][]; error?: string }>((resolve) => {
+      this.exportWaiters.set(id, resolve);
+      this.node!.port.postMessage({ t: 'exportCard', id });
+    });
+    if (m.error || !m.files) throw new Error(m.error ?? 'export failed');
+    return m.files.map(([path, dir, data]) => ({ path, dir, data: data ? new Uint8Array(data) : null }));
+  }
+
+  /**
+   * Power off, replace the card with these files (formatted like the
+   * firmware does, then written through its FatFs), power on.
+   * Returns the files that could not be written.
+   */
+  async importCardAndReboot(files: CardFile[]): Promise<{ bootMs: number; skipped: [string, string][] }> {
+    this.stop();
+    await this.card.erase();
+    const importFiles = files.map((f) => [f.path, f.dir, f.data ? f.data.slice().buffer : null]);
+    const r = await this.boot(importFiles);
+    this.onCard(this.card.size, this.card.persistent);
+    return r;
+  }
+
   /** Fetch everything written to the card so far and store it. */
   syncCard(): Promise<void> {
     if (!this.node) return Promise.resolve();
@@ -111,10 +142,10 @@ export class LxrEmu {
     }
   }
 
-  private boot(): Promise<{ bootMs: number }> {
+  private boot(importFiles?: unknown[]): Promise<{ bootMs: number; skipped: [string, string][] }> {
     if (!this.ctx || !this.wasm) return Promise.reject(new Error('not started'));
     this.stop();
-    const sdChunks = this.card.snapshot();
+    const sdChunks = importFiles ? [] : this.card.snapshot();
     const node = new AudioWorkletNode(this.ctx, 'lxr-processor', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
@@ -124,6 +155,7 @@ export class LxrEmu {
         seed: (Math.random() * 0xffffffff) >>> 0,
         sdMegabytes: SD_MEGABYTES,
         sdChunks,
+        importFiles,
       },
     });
     node.connect(this.ctx.destination);
@@ -134,12 +166,13 @@ export class LxrEmu {
         switch (m.t) {
           case 'ready':
             this.faders.forEach((v, i) => this.send({ t: 'fader', i, v }));
-            resolve({ bootMs: m.bootMs });
+            resolve({ bootMs: m.bootMs, skipped: m.skipped ?? [] });
             break;
           case 'error': reject(new Error(m.msg)); break;
           case 'state': this.onState(m as PanelState); break;
           case 'load': this.onLoad(m.load); break;
           case 'log': this.onLog(m.s); break;
+          case 'cardFiles': this.exportWaiters.get(m.id)?.(m); this.exportWaiters.delete(m.id); break;
           case 'sd': {
             const chunks = m.chunks as Chunk[];
             const saved = this.card.save(chunks);

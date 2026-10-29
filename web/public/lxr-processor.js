@@ -54,15 +54,21 @@ class LxrProcessor extends AudioWorkletProcessor {
 			if (this.x) this.handle(e.data); else this.pending.push(e.data);
 		};
 
-		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs. */
-		const { wasm, seed, sdMegabytes, sdChunks } = options.processorOptions;
+		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs.
+		 * importFiles: instead, a card to build from files, [path, isDir,
+		 * ArrayBuffer | null] triples. */
+		const { wasm, seed, sdMegabytes, sdChunks, importFiles } = options.processorOptions;
 		const imports = { wasi_snapshot_preview1: wasiImports(() => this.x.memory, (s) => this.port.postMessage({ t: 'log', s })) };
 		WebAssembly.instantiate(wasm, imports).then(({ instance }) => {
 			const x = instance.exports;
 			x._initialize();
 			const t0 = Date.now();
 			let res = x.lxr_sd_create(sdMegabytes);
-			if (res === 0) {
+			let skipped = [];
+			if (res === 0 && importFiles) {
+				skipped = this.importCard(x, importFiles);
+				res = x.lxr_boot(seed >>> 0);
+			} else if (res === 0) {
 				for (const [c, data] of sdChunks || []) {
 					const ptr = x.lxr_sd_chunk_for_load(c);
 					if (ptr) new Uint8Array(x.memory.buffer, ptr, data.byteLength).set(new Uint8Array(data));
@@ -75,7 +81,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 			this.bufPtr = x.lxr_audio_buffer();
 			for (const m of this.pending) this.handle(m);
 			this.pending = [];
-			this.port.postMessage({ t: 'ready', res, bootMs: Date.now() - t0 });
+			this.port.postMessage({ t: 'ready', res, bootMs: Date.now() - t0, skipped });
 		}).catch((err) => this.port.postMessage({ t: 'error', msg: String(err && err.stack || err) }));
 	}
 
@@ -91,6 +97,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		case 'param': x.lxr_set_param(m.i, m.v); break;
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
 		case 'syncSd': this.syncSd(m.id); break;
+		case 'exportCard': this.exportCard(m.id); break;
 		case 'getParams': {
 			const n = x.lxr_num_params();
 			const v = new Uint8Array(n);
@@ -99,6 +106,51 @@ class LxrProcessor extends AudioWorkletProcessor {
 			break;
 		}
 		}
+	}
+
+	/* Format the card and write the files to it, before power-on. Returns
+	 * the files the firmware's FatFs refused, with its error code. */
+	importCard(x, files) {
+		const skipped = [];
+		const r = x.lxr_card_import_begin();
+		if (r !== 0) return files.map(([path]) => [path, 'format ' + r]);
+		for (const [path, isDir, data] of files) {
+			if (path.length >= 95 || /[^\x20-\x7e]/.test(path)) { skipped.push([path, 'name']); continue; }
+			const p = x.lxr_card_path_buffer();
+			const mem = new Uint8Array(x.memory.buffer);
+			for (let i = 0; i < path.length; i++) mem[p + i] = path.charCodeAt(i);
+			mem[p + path.length] = 0;
+			const len = data ? data.byteLength : 0;
+			const ptr = x.lxr_card_buffer(len || 1);
+			if (len) new Uint8Array(x.memory.buffer, ptr, len).set(new Uint8Array(data));
+			const err = x.lxr_card_import_file(len, isDir ? 1 : 0);
+			if (err !== 0) skipped.push([path, 'FatFs ' + err]);
+		}
+		x.lxr_card_import_end();
+		return skipped;
+	}
+
+	/* Every file and directory on the card, read through the firmware's
+	 * FatFs: [path, isDir, ArrayBuffer | null]. */
+	exportCard(id) {
+		const x = this.x;
+		const n = x.lxr_card_scan();
+		if (n < 0) { this.port.postMessage({ t: 'cardFiles', id, error: 'scan ' + n }); return; }
+		const files = [];
+		const cstr = (ptr) => {
+			const mem = new Uint8Array(x.memory.buffer);
+			let s = '';
+			while (mem[ptr]) s += String.fromCharCode(mem[ptr++]);
+			return s;
+		};
+		for (let i = 0; i < n; i++) {
+			const path = cstr(x.lxr_card_entry_path(i));
+			if (x.lxr_card_entry_is_dir(i)) { files.push([path, true, null]); continue; }
+			const len = x.lxr_card_entry_read(i);
+			if (len < 0) { this.port.postMessage({ t: 'cardFiles', id, error: 'read ' + path }); return; }
+			files.push([path, false, new Uint8Array(x.memory.buffer, x.lxr_card_buffer(0), len).slice().buffer]);
+		}
+		this.port.postMessage({ t: 'cardFiles', id, files }, files.filter((f) => f[2]).map((f) => f[2]));
 	}
 
 	/* Send the card chunks written since the last sync to the page, which

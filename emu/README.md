@@ -63,8 +63,27 @@ The virtual SD card is kept in the browser, so reloading the page or
 and pattern to the card about 2 seconds after the last change. **Erase SD card**
 wipes it and the firmware formats a new one.
 
-Not there yet: importing/exporting a real SD card, output 2, MIDI, a
-parameter/step editor.
+### Moving things to and from the LXR-02
+
+**SD card…** copies the card's contents between the emulator and your LXR-02.
+Always work with the top level of the card, the folder that holds `GLO.CFG`
+and the `PROJ00`, `PROJ01`, … folders.
+
+- **Export to folder** (Chrome, Edge): pick the mounted SD card. Files with the
+  same name are replaced, other files on the card stay.
+- **Download .zip**: unzip it onto the top level of the card.
+- **Import from folder / .zip**: replaces the virtual card. As the firmware's
+  format routine does, the card is formatted first; then the files are written
+  through the firmware's FatFs and the emulator boots from the card. A zip made
+  with the Finder's Compress works too (the enclosing folder, `__MACOSX` and
+  `.DS_Store` are skipped).
+
+The kit and pattern you are working on are autosaved in `/TMP`, so they travel
+with the card. Export, import and export again gives byte-identical files.
+Not yet tried with a real LXR-02: please report if the device doesn't load an
+exported card.
+
+Not there yet: output 2, MIDI, a parameter/step editor.
 
 ## Building
 

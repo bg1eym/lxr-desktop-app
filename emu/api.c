@@ -22,6 +22,7 @@
 
 #include "emu_hw.h"
 #include "platform.h"
+#include "card_io.h"
 #include "lxr_api.h"
 
 #ifdef __wasm__
@@ -90,6 +91,21 @@ API int lxr_init(uint32_t seed, uint32_t sd_megabytes)
 	const int r = lxr_sd_create(sd_megabytes);
 	return r ? r : lxr_boot(seed);
 }
+
+/* ---- files on the card ---------------------------------------------------------
+ * Export (lxr_card_scan and friends) works while the device runs; import
+ * formats the card and writes files, between lxr_sd_create() and
+ * lxr_boot(). */
+API uint8_t *lxr_card_buffer(uint32_t size) { return card_buffer(size); }
+API char *lxr_card_path_buffer(void) { return card_path_buffer(); }
+API int lxr_card_scan(void) { return booted ? card_scan() : -1; }
+API const char *lxr_card_entry_path(int i) { return card_entry_path(i); }
+API uint32_t lxr_card_entry_size(int i) { return card_entry_size(i); }
+API int lxr_card_entry_is_dir(int i) { return card_entry_is_dir(i); }
+API int32_t lxr_card_entry_read(int i) { return booted ? card_entry_read(i) : -1; }
+API int lxr_card_import_begin(void) { return booted ? -2 : card_import_begin(); }
+API int lxr_card_import_file(uint32_t len, int is_dir) { return booted ? -2 : card_import_file(len, is_dir); }
+API int lxr_card_import_end(void) { return booted ? -2 : card_import_end(); }
 
 /* ---- SD card image (saving/restoring in the browser) ---------------------- */
 API uint32_t lxr_sd_chunk_size(void) { return emu_sd_chunk_size(); }

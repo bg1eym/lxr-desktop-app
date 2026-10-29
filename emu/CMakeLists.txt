@@ -117,6 +117,7 @@ set(EMU_SOURCES
     ${EMU}/hw/sd_emu.c
     ${EMU}/hw/usb_emu.c
     ${EMU}/platform.c
+    ${EMU}/card_io.c
 )
 if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     list(APPEND EMU_SOURCES ${EMU}/api.c)

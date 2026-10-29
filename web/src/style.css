@@ -32,15 +32,17 @@ button { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   max-width: 1220px; margin: 0 auto; padding: 14px 16px;
 }
-.brand { display: flex; align-items: baseline; gap: 10px; font-size: 18px; letter-spacing: 0.02em; }
+.brand { display: flex; align-items: baseline; gap: 10px; font-size: 18px; letter-spacing: 0.02em; white-space: nowrap; flex-shrink: 0; }
 .tag {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-dim);
   border: 1px solid var(--panel-edge); border-radius: 99px; padding: 2px 8px;
 }
 .tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.statusbar {
+  display: flex; gap: 18px; flex-wrap: wrap; max-width: 1220px; margin: -4px auto 12px; padding: 0 16px;
+}
 .status { font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
-.load { min-width: 70px; text-align: right; }
-.load:empty { display: none; }
+.status:empty { display: none; }
 .tool {
   background: var(--cap); border: 1px solid var(--panel-edge); border-radius: 8px;
   padding: 6px 14px; cursor: pointer;
@@ -172,3 +174,20 @@ canvas.lcd { display: block; width: 420px; max-width: 100%; height: auto; image-
   .steps { gap: 10px; }
   .quad { gap: 6px; }
 }
+
+/* SD card dialog */
+.card-dialog {
+  width: min(560px, calc(100vw - 32px)); padding: 22px 24px; border-radius: 14px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--panel-edge);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.card-dialog::backdrop { background: rgba(5, 6, 8, 0.6); }
+.card-dialog h2 { margin: 0 0 6px; font-size: 18px; }
+.card-dialog h3 { margin: 0 0 8px; font-size: 13px; color: var(--ink); }
+.card-intro { margin: 0 0 16px; color: var(--ink-dim); font-size: 13px; line-height: 1.6; }
+.card-group { border-top: 1px solid var(--panel-edge); padding: 14px 0 6px; }
+.card-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.card-hint { color: var(--ink-dim); font-size: 12px; line-height: 1.5; flex: 1 1 200px; margin: 0 0 8px; }
+.card-row .card-hint { margin: 0; }
+.card-status { min-height: 1.5em; margin: 10px 0 0; font-size: 13px; color: var(--accent); line-height: 1.5; word-break: break-word; }
+.card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
