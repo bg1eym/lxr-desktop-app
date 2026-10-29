@@ -112,7 +112,7 @@ export class SoundEditor {
   private hintText = el('p', 'snd-hint');
 
   constructor(private emu: LxrEmu) {
-    this.root.setAttribute('aria-label', 'Sound');
+    onLang(() => this.root.setAttribute('aria-label', t('ariaSound')));
     this.preview.addEventListener('click', () => this.emu.trigger(this.voice, 110));
     this.hide.addEventListener('click', () => this.onHide());
     onLang(() => {

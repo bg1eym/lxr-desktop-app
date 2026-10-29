@@ -31,6 +31,7 @@ const BTN = {
 
 /* GPL-3.0: where the source of this build is. */
 const SOURCE_URL = 'https://github.com/bg1eym/lxr-desktop-app/tree/emu';
+const NOTES_URL = 'https://github.com/bg1eym/lxr-desktop-app/blob/emu/docs/RELEASE_NOTES.md';
 
 const emu = new LxrEmu();
 const buttons = new Map<number, PanelButton>();
@@ -154,6 +155,9 @@ const overlay = h('div', 'overlay',
     text(h('p'), 'intro'),
     startBtn));
 
+const version = Object.assign(h('a', 'version'), { href: NOTES_URL });
+onLang(() => { version.textContent = t('version', { v: __APP_VERSION__ }); });
+
 document.querySelector('#app')!.append(
   h('header', 'bar',
     h('div', 'brand', h('strong', '', 'LXR-02 Emu'), h('span', 'tag', 'unofficial')),
@@ -171,7 +175,9 @@ document.querySelector('#app')!.append(
   h('footer', 'foot',
     text(h('span'), 'footer'),
     ' ',
-    Object.assign(text(h('a'), 'source'), { href: SOURCE_URL })));
+    Object.assign(text(h('a'), 'source'), { href: SOURCE_URL }),
+    ' · ',
+    version));
 
 /* ---- device state -------------------------------------------------------- */
 emu.onState = (s: PanelState) => {

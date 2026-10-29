@@ -204,7 +204,7 @@ export class Sequencer {
 
   constructor(private emu: LxrEmu) {
     this.root = el('section', 'seq off');
-    this.root.setAttribute('aria-label', 'Sequencer');
+    aria(this.root, 'ariaSequencer');
     this.root.append(this.buildToolbar(), el('div', 'seq-body', this.buildMain(), this.side));
     this.setSideShown(this.sideShown);
     this.emu.seqEdit({ keep: this.keep });

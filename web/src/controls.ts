@@ -5,6 +5,7 @@
  * Copyright (C) 2026 LXR-02 Emu contributors
  * SPDX-License-Identifier: GPL-3.0-only
  */
+import { onLang, t } from './i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -153,11 +154,11 @@ export class Encoder {
     const ring = el('div', 'ring');
     ring.tabIndex = 0;
     ring.setAttribute('role', 'slider');
-    ring.setAttribute('aria-label', 'Data encoder');
+    onLang(() => ring.setAttribute('aria-label', t('ariaEncoder')));
     this.dial = el('div', 'dial');
     const cap = el('button', 'push');
     cap.type = 'button';
-    cap.setAttribute('aria-label', 'Encoder push');
+    onLang(() => cap.setAttribute('aria-label', t('ariaEncoderPush')));
     this.cap = cap;
     ring.append(this.dial, cap);
     this.root.append(ring, el('div', 'plabel', 'DATA'));
@@ -215,7 +216,7 @@ export class Fader {
     input.min = '0';
     input.max = '1000';
     input.value = '1000';
-    input.setAttribute('aria-label', `${label} volume`);
+    onLang(() => input.setAttribute('aria-label', t('ariaFader', { name: label })));
     input.addEventListener('input', () => onChange(Number(input.value) / 1000));
     this.root.append(input, el('div', 'plabel', label));
   }
