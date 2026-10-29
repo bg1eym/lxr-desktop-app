@@ -140,14 +140,24 @@ static int cmd_selftest(const char *self)
 	return fails ? 1 : 0;
 }
 
+/* The sound menus as JSON, as the web page's sound editor gets them. */
+static int cmd_describe(void)
+{
+	if (lxr_init(1, 64) < 0) return 1;
+	puts(lxr_ui_describe());
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc >= 2 && !strcmp(argv[1], "render")) return cmd_render(argc - 2, argv + 2);
 	if (argc >= 2 && !strcmp(argv[1], "selftest")) return cmd_selftest(argv[0]);
+	if (argc >= 2 && !strcmp(argv[1], "describe")) return cmd_describe();
 	fprintf(stderr,
 		"LXR-02 Emu (unofficial) - firmware 1.7 on the host\n"
 		"usage: %s render [--seed N] [--bars N] [--channels 2|4] [--demo] [--out file.wav]\n"
-		"       %s selftest\n",
-		argv[0], argv[0]);
+		"       %s selftest\n"
+		"       %s describe   (sound menus as JSON)\n",
+		argv[0], argv[0], argv[0]);
 	return 2;
 }

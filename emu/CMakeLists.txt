@@ -121,7 +121,7 @@ set(EMU_SOURCES
 )
 # The exported API. In the WebAssembly build these go straight into the
 # module: from a static library the linker would drop what nothing calls.
-set(EMU_API_SOURCES ${EMU}/api.c ${EMU}/seq_api.c)
+set(EMU_API_SOURCES ${EMU}/api.c ${EMU}/seq_api.c ${EMU}/param_api.c)
 if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     list(APPEND EMU_SOURCES ${EMU_API_SOURCES})
 endif()

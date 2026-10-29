@@ -76,6 +76,10 @@ int lxr_num_params(void);
 int lxr_num_sound_params(void);
 int lxr_get_param(int idx);
 void lxr_set_param(int idx, int value);
+/* The firmware's sound menus as JSON (param_api.c), and all parameter values. */
+const char *lxr_ui_describe(void);
+const uint8_t *lxr_params(void);
+int lxr_select_voice(uint8_t voice);
 
 void lxr_set_main_step(uint8_t pattern, uint8_t voice, uint8_t step, uint8_t on);
 int lxr_get_main_step(uint8_t pattern, uint8_t voice, uint8_t step);

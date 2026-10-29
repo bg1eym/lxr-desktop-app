@@ -17,6 +17,8 @@
 #include "buttonHandler.h"
 #include "frontPanelParser_ui.h"
 #include "Preset/PresetManager.h"
+#include "menu/CcNr2Text.h"
+#include "menu/copyClearTools.h"
 #include "Soundengine/Sequencer/sequencer.h"
 #include "Soundengine/config.h"
 
@@ -213,6 +215,14 @@ API int lxr_get_param(int idx) { return (idx >= 0 && idx < NUM_PARAMS) ? activeP
 API void lxr_set_param(int idx, int value)
 {
 	if (idx < 0 || idx >= NUM_PARAMS) return;
+	if (idx >= PAR_VOICE_LFO1 && idx < PAR_VOICE_LFO1 + 6 && value >= 1 && value <= 6) {
+		/* a new voice for an LFO: move its target to the same parameter of
+		 * that voice, as menu_encoderChangeParameter() does (it keeps the
+		 * gap index of the target in menu_TargetVoiceGapIndex) */
+		const uint8_t i = (uint8_t)(idx - PAR_VOICE_LFO1);
+		const uint8_t gap = getModTargetGapIndex(activeParameters[PAR_TARGET_LFO1 + i]);
+		activeParameters[PAR_TARGET_LFO1 + i] = getModTargetIdxFromGapIdx((uint8_t)(value - 1), gap);
+	}
 	activeParameters[idx] = (uint8_t)value;
 	preset_touchTimer(PRESET_KIT_TIMER);
 
@@ -237,6 +247,21 @@ API void lxr_set_param(int idx, int value)
 		menu_parseGlobalParam((uint16_t)idx, (uint8_t)value);
 	}
 	menu_repaintAll();
+}
+
+/* Make a voice the panel's active voice, by pressing its voice button, but
+ * only where that button just selects the voice: not in copy mode, not with
+ * SHIFT (mute), not on the performance page (mute) and only in voice mode.
+ * Returns 1 if the voice is or becomes the active one. */
+API int lxr_select_voice(uint8_t voice)
+{
+	if (voice > 6) return 0;
+	if (menu_getActiveVoice() == voice) return 1;
+	if (copyClear_Mode >= MODE_COPY_PATTERN || buttonHandler_getShift() || menu_activePage == PERF_PAGE ||
+	    buttonHandler_getMode() != SELECT_MODE_VOICE)
+		return 0;
+	lxr_button_click((uint8_t)(BUT_VOICE_1 + voice));
+	return 1;
 }
 
 /* ---- sequencer ------------------------------------------------------------- */
