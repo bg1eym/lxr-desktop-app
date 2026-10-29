@@ -42,7 +42,15 @@ sound.onHide = () => seq.setSideShown(false);
 seq.onTrack = (track) => {
   sound.setVoice(track);
   emu.selectVoice(track);   // the display and the knobs follow, where the voice button would
+  showVelocity();
 };
+/* Step velocity is only heard when the voice's kit uses it: say so at the
+ * velocity lane, with a button for "Velocity → volume". */
+function showVelocity() {
+  const v = sound.velocity(seq.selectedTrack);
+  seq.setVelocityOff(v && !v.heard ? { fix: () => emu.setParam(v.volumeParam, 1) } : null);
+}
+sound.onValues = showVelocity;
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);

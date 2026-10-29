@@ -142,6 +142,7 @@ export class SoundEditor {
   /** After every boot: the menus depend on the samples on the card. */
   async load() {
     this.desc = JSON.parse(await this.emu.describe()) as Describe;
+    this.onValues();
     if (!this.pageParams(this.page).length) this.page = this.firstPage();
     this.active = this.firstSlot(this.page);
     this.build();
@@ -163,11 +164,29 @@ export class SoundEditor {
     this.build();
   }
 
+  /** Whether step velocity is heard on a voice: "Velocity → volume" on, or
+   * a velocity target with an amount. Its switch, to turn it on. */
+  velocity(voice: number): { heard: boolean; volumeParam: number } | null {
+    const d = this.desc, v = this.values;
+    if (!d || !v) return null;
+    const all = d.voices[voice].flat().filter((x): x is ParamDesc => !!x && x.c === 'Velocity');
+    const vol = all.find((x) => x.t === T_ON_OFF);
+    const target = all.find((x) => x.t === T_TARGET_VELO);
+    const amount = all.find((x) => x.l === 'Amount');
+    if (!vol) return null;
+    const heard = v[vol.p] === 1 || (!!target && !!amount && v[target.p] !== 0 && v[amount.p] !== 0);
+    return { heard, volumeParam: vol.p };
+  }
+
+  /** Called after every change of the parameters. */
+  onValues: () => void = () => {};
+
   setParams(values: Uint8Array, ack: number) {
     if (ack < this.ack) return;   // older than a change in flight
     this.values = values;
     for (const c of this.controls) c.update(values[c.desc.p]);
     this.drawLcd();
+    this.onValues();
   }
 
   /* ---- pages --------------------------------------------------------------- */

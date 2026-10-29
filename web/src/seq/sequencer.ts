@@ -195,12 +195,22 @@ export class Sequencer {
   private laneBars: { root: HTMLDivElement; bar: HTMLDivElement; label: HTMLSpanElement }[] = [];
   private laneArea = el('div', 'seq-lane-steps');
   private laneName = el('div', 'seq-lane-name');
+  private laneNote = el('div', 'seq-lane-note');
+  private velocityOff: { fix: () => void } | null = null;
   private pop: HTMLElement | null = null;
 
   /** Right of the grid: the sound panel goes here. */
   readonly side = el('aside', 'seq-side');
   /** The selected track changed. */
   onTrack: (track: number) => void = () => {};
+
+  /** The selected track's kit ignores step velocity ("Velocity → volume" is
+   * off and nothing else is modulated by it): say so above the velocity
+   * lane, with a way to turn it on. null when velocity is heard. */
+  setVelocityOff(off: { fix: () => void } | null) {
+    this.velocityOff = off;
+    this.renderLane();
+  }
 
   constructor(private emu: LxrEmu) {
     this.root = el('section', 'seq off');
@@ -397,7 +407,7 @@ export class Sequencer {
     this.laneArea.append(...groups);
     aria(this.laneArea, 'seqLaneHint');
     this.bindLane();
-    const lane = el('div', 'seq-lane', el('div', 'seq-lane-head', this.laneName, tabs), this.laneArea);
+    const lane = el('div', 'seq-lane', el('div', 'seq-lane-head', this.laneName, tabs), this.laneNote, this.laneArea);
     return el('div', 'seq-main', view, this.grid, lane);
   }
 
@@ -593,6 +603,13 @@ export class Sequencer {
 
   private renderLane() {
     const d = this.data;
+    const off = this.lane === 'vel' && this.live ? this.velocityOff : null;
+    this.laneNote.hidden = !off;
+    if (off) {
+      const fix = btn('seq-tool seq-small', t('seqVelTurnOn'));
+      fix.addEventListener('click', () => off.fix());
+      this.laneNote.replaceChildren(el('span', '', t('seqVelNoEffect', { track: TRACK_NAMES[this.track] })), fix);
+    }
     this.laneName.textContent = TRACK_NAMES[this.track];
     this.laneName.style.color = TRACK_COLORS[this.track];
     LANES.forEach(([lane], i) => {
