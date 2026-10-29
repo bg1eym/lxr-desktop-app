@@ -26,6 +26,7 @@ const PAR_BPM = 272;            // activeParameters index; 0 = EXT, 1 = MIDI clo
 const BPM_MIN = 20;
 const BPM_MAX = 255;
 const KEEP_KEY = 'lxr02-emu-keep-edits';
+const SIDE_KEY = 'lxr02-emu-sound-panel';
 
 export const TRACK_NAMES = ['DRUM 1', 'DRUM 2', 'DRUM 3', 'SNARE', 'CYMBAL', 'HH CLOSED', 'HH OPEN'];
 const ROW_NAMES = ['DRUM 1', 'DRUM 2', 'DRUM 3', 'SNARE', 'CYMBAL', 'HH CLS', 'HH OPN'];   // as on the panel
@@ -78,12 +79,13 @@ function i18nText<E extends HTMLElement>(e: E, key: Key, vars: Record<string, st
   return e;
 }
 
-function loadKeep(): boolean {
-  try { return localStorage.getItem(KEEP_KEY) !== '0'; } catch { return true; }
+/** A setting kept in this browser; on unless switched off. */
+function loadFlag(key: string): boolean {
+  try { return localStorage.getItem(key) !== '0'; } catch { return true; }
 }
 
-function saveKeep(on: boolean) {
-  try { localStorage.setItem(KEEP_KEY, on ? '1' : '0'); } catch { /* not kept */ }
+function saveFlag(key: string, on: boolean) {
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* not kept */ }
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -155,7 +157,8 @@ export class Sequencer {
   private sel = new Set<number>([0]); // selected steps of that track
   private anchor = 0;              // last clicked step, for keyboard moves
   private lane: Lane = 'vel';
-  private keep = loadKeep();
+  private keep = loadFlag(KEEP_KEY);
+  private sideShown = loadFlag(SIDE_KEY);
   private solo = new Set<number>();
   private preSoloMutes: number | null = null;
   private undoStack: UndoEntry[] = [];
@@ -181,6 +184,7 @@ export class Sequencer {
   private undoBtn = btn('seq-tool seq-icon', '↶');
   private redoBtn = btn('seq-tool seq-icon', '↷');
   private followBtn = btn('seq-tool seq-toggle');
+  private sideBtn = btn('seq-tool seq-toggle');
   private barLabel = el('span', 'seq-bar-label');
   private overview = el('canvas', 'seq-overview');
 
@@ -202,6 +206,7 @@ export class Sequencer {
     this.root = el('section', 'seq off');
     this.root.setAttribute('aria-label', 'Sequencer');
     this.root.append(this.buildToolbar(), el('div', 'seq-body', this.buildMain(), this.side));
+    this.setSideShown(this.sideShown);
     this.emu.seqEdit({ keep: this.keep });
     this.bindKeys();
     onLang(() => this.render());
@@ -303,7 +308,7 @@ export class Sequencer {
     this.keepBox.checked = this.keep;
     this.keepBox.addEventListener('change', () => {
       this.keep = this.keepBox.checked;
-      saveKeep(this.keep);
+      saveFlag(KEEP_KEY, this.keep);
       this.send({ keep: this.keep });
     });
     const keep = el('label', 'seq-check', this.keepBox, i18nText(el('span'), 'seqKeep'));
@@ -321,6 +326,10 @@ export class Sequencer {
       this.renderToolbar();
     });
 
+    i18nText(this.sideBtn, 'seqSoundPanel');
+    hint(this.sideBtn, 'seqSoundPanelHint', {}, false);
+    this.sideBtn.addEventListener('click', () => this.setSideShown(!this.sideShown));
+
     const group = (...kids: (Node | string)[]) => el('div', 'seq-group', ...kids);
     const label = (key: Key) => i18nText(el('span', 'seq-label'), key);
     return el('div', 'seq-bar',
@@ -329,7 +338,18 @@ export class Sequencer {
       group(label('seqSwing'), sw, this.swingValue),
       group(label('seqPattern'), prev, this.patBtn, next, this.patPending),
       group(this.editedChip, this.saveBtn, keep),
-      group(this.undoBtn, this.redoBtn));
+      group(this.undoBtn, this.redoBtn),
+      el('div', 'seq-spacer'),
+      group(this.sideBtn));
+  }
+
+  /** Show or hide the sound panel; without it the grid takes the whole width. */
+  setSideShown(on: boolean) {
+    this.sideShown = on;
+    saveFlag(SIDE_KEY, on);
+    this.root.classList.toggle('side-hidden', !on);
+    this.sideBtn.classList.toggle('on', on);
+    this.sideBtn.setAttribute('aria-pressed', String(on));
   }
 
   private buildMain(): HTMLElement {

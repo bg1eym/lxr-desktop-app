@@ -94,6 +94,8 @@ The panel to the right of the grid edits the voice of the selected track
   where the voice buttons do something else).
 - Changes go into the current kit, which the firmware saves to the card
   2 seconds later, as on the device; SAVE it on the panel to keep it in a kit slot.
+- **Sound panel** at the right of the toolbar (or × on the panel) hides it once
+  the sounds are set; the grid then takes the whole width. The browser remembers it.
 
 ### Panel
 

@@ -103,6 +103,9 @@ export class SoundEditor {
   private controls: Control[] = [];
   private title = el('h3', 'snd-title');
   private preview = btn('seq-tool snd-preview', '');
+  private hide = btn('seq-tool snd-hide', '×');
+  /** The panel's hide button was clicked. */
+  onHide: () => void = () => {};
   private lcd = new LcdView();
   private tabs: HTMLButtonElement[] = [];
   private body = el('div', 'snd-body');
@@ -111,6 +114,11 @@ export class SoundEditor {
   constructor(private emu: LxrEmu) {
     this.root.setAttribute('aria-label', 'Sound');
     this.preview.addEventListener('click', () => this.emu.trigger(this.voice, 110));
+    this.hide.addEventListener('click', () => this.onHide());
+    onLang(() => {
+      this.hide.title = t('sndHide');
+      this.hide.setAttribute('aria-label', t('sndHide'));
+    });
     const tabs = el('div', 'snd-tabs');
     PAGES.forEach(([name], i) => {
       const b = btn('snd-tab', el('span', 'snd-tab-n', String(i + 1)));
@@ -125,7 +133,7 @@ export class SoundEditor {
       tabs.append(b);
     });
     this.root.append(
-      el('div', 'snd-head', el('span', 'seq-swatch'), this.title, this.preview),
+      el('div', 'snd-head', el('span', 'seq-swatch'), this.title, this.preview, this.hide),
       el('div', 'snd-lcd lcd-bezel', this.lcd.canvas),
       tabs, this.body, this.hintText);
     onLang(() => this.build());

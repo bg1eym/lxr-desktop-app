@@ -37,6 +37,7 @@ const buttons = new Map<number, PanelButton>();
 const seq = new Sequencer(emu);
 const sound = new SoundEditor(emu);
 seq.side.append(sound.root);
+sound.onHide = () => seq.setSideShown(false);
 seq.onTrack = (track) => {
   sound.setVoice(track);
   emu.selectVoice(track);   // the display and the knobs follow, where the voice button would
