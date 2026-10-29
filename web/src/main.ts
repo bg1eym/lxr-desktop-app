@@ -11,6 +11,7 @@ import { Encoder, Fader, PanelButton, Pot, type ButtonOpts } from './controls';
 import { currentLang, onLang, setLang, t, text, type Key } from './i18n';
 import { cardDialog } from './cardDialog';
 import { makeZip, readFolder, readZip, writeFolder } from './cardFiles';
+import { Sequencer } from './seq/sequencer';
 
 /* Button and LED numbers: enum ButtonNumbers (Core/Inc/buttonHandler.h) and
  * the LED enum (Core/Inc/ledHandler.h) share the shift register layout. */
@@ -32,6 +33,7 @@ const SOURCE_URL = 'https://github.com/bg1eym/lxr-desktop-app/tree/emu';
 
 const emu = new LxrEmu();
 const buttons = new Map<number, PanelButton>();
+const seq = new Sequencer(emu);
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -149,10 +151,11 @@ document.querySelector('#app')!.append(
     h('div', 'brand', h('strong', '', 'LXR-02 Emu'), h('span', 'tag', 'unofficial')),
     h('div', 'tools', cardBtn, rebootBtn, eraseBtn, langBtn)),
   h('div', 'statusbar', status, card, load),
-  h('div', 'stage', device, overlay),
+  h('div', 'stage', seq.root, device, overlay),
   h('section', 'help',
     text(h('h3'), 'helpTitle'),
     h('ul', '',
+      text(h('li'), 'helpSeq'),
       text(h('li'), 'helpKnobs'),
       text(h('li'), 'helpButtons'),
       text(h('li'), 'helpCard'),
@@ -169,7 +172,9 @@ emu.onState = (s: PanelState) => {
     const on = n < 32 ? (s.lo >>> n) & 1 : (s.hi >>> (n - 32)) & 1;
     b.setLed(on === 1);
   }
+  seq.setTransport(s.playheads, s.run !== 0);
 };
+emu.onSeq = (d, ack) => seq.setData(d, ack);
 emu.onLoad = (l) => { load.textContent = `DSP ≈ ${(l * 100).toFixed(1)}%`; };
 emu.onCard = (bytes, persistent) => {
   const mb = (bytes / 1048576).toFixed(1);
@@ -178,6 +183,7 @@ emu.onCard = (bytes, persistent) => {
 };
 
 async function power(how: 'start' | 'reboot' | 'erase') {
+  seq.setLive(false);
   startBtn.disabled = true;
   rebootBtn.disabled = true;
   eraseBtn.disabled = true;
@@ -189,6 +195,7 @@ async function power(how: 'start' | 'reboot' | 'erase') {
     emu.onCard(emu.card.size, emu.card.persistent);
     overlay.hidden = true;
     device.classList.add('live');
+    seq.setLive(true);
     rebootBtn.disabled = false;
     eraseBtn.disabled = false;
     cardBtn.disabled = false;
@@ -247,4 +254,4 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => shiftBtn.set(false));
 
 // for automated checks
-(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN, cardFiles: { readFolder, writeFolder, makeZip, readZip } };
+(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN, seq, cardFiles: { readFolder, writeFolder, makeZip, readZip } };

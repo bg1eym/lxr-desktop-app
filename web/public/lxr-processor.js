@@ -12,6 +12,7 @@
 const QUANTUM = 128;
 const STATE_EVERY = 4;          /* quanta between state messages, ~86 Hz */
 const SD_EVERY = 172;           /* quanta between SD card syncs, ~0.5 s */
+const SEQ_EVERY = 8;            /* quanta between sequencer data checks, ~23 ms */
 
 /* The module only needs fd_write (printf to stdout/stderr), fd_seek and
  * fd_close from WASI. AudioWorkletGlobalScope has no TextDecoder, the text
@@ -49,7 +50,10 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.quanta = 0;
 		this.renderMs = 0;
 		this.renderQuanta = 0;
-		this.last = { lcd: '', cg: '', st: -1, lo: -1, hi: -1, run: -1 };
+		this.last = { lcd: '', cg: '', st: -1, lo: -1, hi: -1, run: -1, heads: '' };
+		this.seqView = 255;      /* pattern shown by the page; 255 = the playing one */
+		this.lastSeq = null;
+		this.seqAck = 0;         /* id of the last sequencer edit done, counted by the page */
 		this.port.onmessage = (e) => {
 			if (this.x) this.handle(e.data); else this.pending.push(e.data);
 		};
@@ -57,7 +61,8 @@ class LxrProcessor extends AudioWorkletProcessor {
 		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs.
 		 * importFiles: instead, a card to build from files, [path, isDir,
 		 * ArrayBuffer | null] triples. */
-		const { wasm, seed, sdMegabytes, sdChunks, importFiles } = options.processorOptions;
+		const { wasm, seed, sdMegabytes, sdChunks, importFiles, seqAck } = options.processorOptions;
+		this.seqAck = seqAck || 0;
 		const imports = { wasi_snapshot_preview1: wasiImports(() => this.x.memory, (s) => this.port.postMessage({ t: 'log', s })) };
 		WebAssembly.instantiate(wasm, imports).then(({ instance }) => {
 			const x = instance.exports;
@@ -97,6 +102,9 @@ class LxrProcessor extends AudioWorkletProcessor {
 		case 'param': x.lxr_set_param(m.i, m.v); break;
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
 		case 'syncSd': this.syncSd(m.id); break;
+		case 'seqView': this.seqView = m.pattern; this.lastSeq = null; break;
+		case 'seq': this.seqEdit(m); break;
+		case 'trigger': x.lxr_trigger(m.voice, m.velocity); break;
 		case 'exportCard': this.exportCard(m.id); break;
 		case 'getParams': {
 			const n = x.lxr_num_params();
@@ -168,6 +176,40 @@ class LxrProcessor extends AudioWorkletProcessor {
 		}
 	}
 
+	/* Edits from the sequencer page. Each has an id; the data sent back says
+	 * which edits it includes, so the page can tell old data from new. */
+	seqEdit(m) {
+		const x = this.x;
+		for (const w of m.steps || []) x.lxr_seq_write_step(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8]);
+		for (const l of m.locks || []) x.lxr_seq_write_locks(l[0], l[1], l[2], l[3], l[4], l[5], l[6]);
+		for (const [p, t, len] of m.lengths || []) x.lxr_seq_set_length(p, t, len);
+		for (const [t, muted] of m.mutes || []) x.lxr_seq_set_mute(t, muted ? 1 : 0);
+		if (m.swing) x.lxr_seq_set_swing(m.swing[0], m.swing[1]);
+		if (m.keep !== undefined) x.lxr_seq_keep_edits(m.keep ? 1 : 0);
+		if (m.save) x.lxr_seq_save();
+		if (m.pattern !== undefined) x.lxr_seq_change_pattern(m.pattern);
+		this.seqAck = m.id;
+		this.checkSeq(true);
+	}
+
+	/* Send the shown pattern's data when it changed (edits from the page, the
+	 * virtual panel or MIDI all end up here). */
+	checkSeq(force) {
+		const x = this.x;
+		const size = x.lxr_seq_snapshot_size();
+		const snap = new Uint8Array(x.memory.buffer, x.lxr_seq_snapshot(this.seqView), size);
+		const last = this.lastSeq;
+		if (last && !force) {
+			let same = true;
+			for (let i = 0; i < size; i++) if (snap[i] !== last[i]) { same = false; break; }
+			if (same) return;
+		}
+		const copy = snap.slice();
+		this.lastSeq = copy;
+		const out = copy.slice();
+		this.port.postMessage({ t: 'seq', data: out, ack: this.seqAck }, [out.buffer]);
+	}
+
 	postState() {
 		const x = this.x;
 		const mem = x.memory.buffer;
@@ -179,10 +221,13 @@ class LxrProcessor extends AudioWorkletProcessor {
 		const lo = x.lxr_get_leds_lo() >>> 0;
 		const hi = x.lxr_get_leds_hi() >>> 0;
 		const run = x.lxr_is_running();
+		let heads = '';
+		for (let t = 0; t < 7; t++) heads += String.fromCharCode(x.lxr_seq_playhead(t) + 32);
 		const l = this.last;
-		if (lcd === l.lcd && cg === l.cg && st === l.st && lo === l.lo && hi === l.hi && run === l.run) return;
-		this.last = { lcd, cg, st, lo, hi, run };
-		this.port.postMessage({ t: 'state', lcd: lcdBytes.slice(), cg: cgBytes.slice(), st, lo, hi, run });
+		if (lcd === l.lcd && cg === l.cg && st === l.st && lo === l.lo && hi === l.hi && run === l.run && heads === l.heads) return;
+		this.last = { lcd, cg, st, lo, hi, run, heads };
+		const playheads = Array.from(heads, (c) => c.charCodeAt(0) - 32);
+		this.port.postMessage({ t: 'state', lcd: lcdBytes.slice(), cg: cgBytes.slice(), st, lo, hi, run, playheads });
 	}
 
 	process(inputs, outputs) {
@@ -206,6 +251,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 
 		if (++this.quanta % STATE_EVERY === 0) this.postState();
 		if (this.quanta % SD_EVERY === 0) this.syncSd();
+		if (this.quanta % SEQ_EVERY === 0) this.checkSeq();
 		if (this.renderQuanta >= 1034) {   /* about every 3 s: Date.now() only has 1 ms steps */
 			const audioMs = this.renderQuanta * QUANTUM / sampleRate * 1000;
 			this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });

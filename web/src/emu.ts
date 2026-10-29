@@ -16,6 +16,7 @@ export interface PanelState {
   lo: number;        // LEDs 0..31
   hi: number;        // LEDs 32..40
   run: number;       // sequencer running
+  playheads: number[]; // current step of each track
 }
 
 type Msg =
@@ -26,10 +27,34 @@ type Msg =
   | { t: 'fader'; i: number; v: number }
   | { t: 'jacks'; m: number }
   | { t: 'param'; i: number; v: number }
-  | { t: 'midi'; data: number[] };
+  | { t: 'midi'; data: number[] }
+  | { t: 'seqView'; pattern: number }
+  | ({ t: 'seq'; id: number } & SeqEdit)
+  | { t: 'trigger'; voice: number; velocity: number };
+
+/** Changes to the pattern data, done in this order. */
+export interface SeqEdit {
+  /** [pattern, track, step, on, velocity, probability, note, retrig, nudge] */
+  steps?: number[][];
+  /** [pattern, track, step, lock 1 parameter, value, lock 2 parameter, value] */
+  locks?: number[][];
+  /** [pattern, track, length] */
+  lengths?: number[][];
+  /** [track, muted] */
+  mutes?: [number, boolean][];
+  /** [pattern, 0-127] */
+  swing?: [number, number];
+  /** keep edits of the playing pattern when the pattern changes */
+  keep?: boolean;
+  /** save the playing pattern, as SAVE does */
+  save?: boolean;
+  /** play another pattern: at the end of the current one, or now when stopped */
+  pattern?: number;
+}
 
 import { SdStore, type Chunk } from './sdStore';
 import type { CardFile } from './cardFiles';
+import { parseSnapshot, type SeqData } from './seq/model';
 
 const BASE = import.meta.env.BASE_URL;
 /* Size of the virtual card. A card formatted earlier keeps its own file
@@ -40,6 +65,9 @@ export class LxrEmu {
   onState: (s: PanelState) => void = () => {};
   onLoad: (load: number) => void = () => {};
   onLog: (line: string) => void = (s) => console.log('[lxr]', s);
+  /** Pattern data of the shown pattern, whenever it changes. ack: the id of
+   * the last seqEdit() it includes. */
+  onSeq: (data: SeqData, ack: number) => void = () => {};
   /** The card was written (bytes stored, whether it survives a reload). */
   onCard: (bytes: number, persistent: boolean) => void = () => {};
 
@@ -49,6 +77,8 @@ export class LxrEmu {
   private wasm: ArrayBuffer | null = null;
   private faders = [1, 1, 1, 1, 1, 1];
   private syncId = 0;
+  private seqId = 0;
+  private keepEdits = false;
   private syncWaiters = new Map<number, () => void>();
   private exportWaiters = new Map<number, (m: { files?: [string, boolean, ArrayBuffer | null][]; error?: string }) => void>();
   private cardLoaded = false;
@@ -156,6 +186,7 @@ export class LxrEmu {
         sdMegabytes: SD_MEGABYTES,
         sdChunks,
         importFiles,
+        seqAck: this.seqId,
       },
     });
     node.connect(this.ctx.destination);
@@ -166,10 +197,12 @@ export class LxrEmu {
         switch (m.t) {
           case 'ready':
             this.faders.forEach((v, i) => this.send({ t: 'fader', i, v }));
+            if (this.keepEdits) this.seqEdit({ keep: true });
             resolve({ bootMs: m.bootMs, skipped: m.skipped ?? [] });
             break;
           case 'error': reject(new Error(m.msg)); break;
           case 'state': this.onState(m as PanelState); break;
+          case 'seq': this.onSeq(parseSnapshot(m.data), m.ack); break;
           case 'load': this.onLoad(m.load); break;
           case 'log': this.onLog(m.s); break;
           case 'cardFiles': this.exportWaiters.get(m.id)?.(m); this.exportWaiters.delete(m.id); break;
@@ -195,4 +228,18 @@ export class LxrEmu {
   pot(i: number, degrees: number) { if (degrees) this.send({ t: 'pot', i, deg: degrees }); }
   fader(i: number, v: number) { this.faders[i] = v; this.send({ t: 'fader', i, v }); }
   midi(data: number[]) { this.send({ t: 'midi', data }); }
+
+  /* sequencer */
+  /** Show this pattern's data in onSeq; 255 = always the playing pattern. */
+  seqView(pattern: number) { this.send({ t: 'seqView', pattern }); }
+  /** Change pattern data. Returns the edit's id. */
+  seqEdit(edit: SeqEdit): number {
+    if (edit.keep !== undefined) this.keepEdits = edit.keep;
+    const id = ++this.seqId;
+    this.send({ t: 'seq', id, ...edit });
+    return id;
+  }
+  /** Preview a voice. */
+  trigger(voice: number, velocity = 110) { this.send({ t: 'trigger', voice, velocity }); }
+  setParam(i: number, v: number) { this.send({ t: 'param', i, v }); }
 }
