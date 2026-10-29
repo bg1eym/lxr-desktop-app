@@ -1,5 +1,6 @@
 > **This branch adds LXR-02 Emu (unofficial)**: the firmware below running in the browser.
-> Try it at <https://bg1eym.github.io/lxr-desktop-app/>, read [emu/README.md](emu/README.md).
+> Try it at <https://bg1eym.github.io/lxr-desktop-app/>, read [emu/README.md](emu/README.md) and the
+> [release notes](docs/RELEASE_NOTES.md).
 > Not affiliated with or approved by Erica Synths.
 
 # LXR V2 firmware (desktop, STM32F765VG)

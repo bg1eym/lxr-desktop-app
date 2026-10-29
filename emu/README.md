@@ -5,7 +5,8 @@ It runs the open-source firmware's own C code (version 1.7) in the browser,
 compiled to WebAssembly and played through an AudioWorklet, with a virtual
 front panel.
 
-**Try it: <https://bg1eym.github.io/lxr-desktop-app/>** (desktop Chrome recommended)
+**Try it: <https://bg1eym.github.io/lxr-desktop-app/>** (desktop Chrome recommended).
+What's new: [release notes](../docs/RELEASE_NOTES.md) (English and Chinese).
 
 > Not affiliated with, endorsed by or approved by Erica Synths. "Erica Synths",
 > "LXR" and "LXR-02" are trademarks of Erica Synths and are used here only to
