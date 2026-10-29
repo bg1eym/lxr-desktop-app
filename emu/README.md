@@ -108,6 +108,10 @@ The virtual panel below works like the device:
 - **Keyboard:** Space = START/STOP, Shift = SHIFT, ←/→ = DATA, Enter = push DATA,
   PageUp/PageDown = page buttons, 1-7 = voices, Q-I and A-K = steps 1-16, Z/X/C/V = mode buttons.
 
+With nothing playing, the emulator pauses after 10 minutes without input, or
+after 5 minutes in the background, so that it is not running when the computer
+sleeps; click anywhere or press a key to go on where it was.
+
 The virtual SD card is kept in the browser, so reloading the page or
 **Reboot** keeps it. Like the device, the firmware writes the current kit
 and pattern to the card about 2 seconds after the last change. **Erase SD card**

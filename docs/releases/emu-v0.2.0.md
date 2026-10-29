@@ -65,6 +65,11 @@ pattern and kit.
 - When an LFO's target voice changes, its target moves to the same parameter of the new voice, as the
   device's menu does.
 - The version number is shown at the bottom of the page.
+- **Power saving:** with nothing playing, the emulator pauses after 10 minutes without mouse or
+  keyboard input, or after 5 minutes in the background, so that it is not running when the computer
+  goes to sleep. A click or a key goes on where it was. This is meant to help with the browser
+  freezing or crashing after the computer slept, which came up in testing. The cause is not
+  confirmed yet; please report if it still happens.
 
 ### Upgrading
 
@@ -136,6 +141,7 @@ is kept, with the patterns and kits you made before.
 - **语言**：浏览器的第一语言是中文时页面显示中文，其他情况显示英文。右上角的按钮可以切换，选择会被记住。按钮、菜单和读屏标签都已翻译；BPM、Swing、Retrig、页名等设备术语，以及固件屏幕上的文字，保持和真机一致。
 - 改变 LFO 的目标声部时，调制目标会换成新声部上的同一个参数，和真机菜单的做法一样。
 - 页面底部显示版本号。
+- **省电**：没有播放时，10 分钟没有鼠标或键盘操作，或者页面在后台放了 5 分钟，模拟器会暂停，这样电脑休眠时它不在运行。点击页面或按任意键就从原处继续。这是为了解决测试中遇到的电脑休眠后浏览器卡死或崩溃的问题，原因还没有确认；如果还会发生，请告诉我。
 
 ### 如何升级
 
