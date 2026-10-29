@@ -74,16 +74,30 @@ pattern and kit.
   display texts stay as on the device.
 - When an LFO's target voice changes, its target moves to the same parameter of the new voice, as the
   device's menu does.
-- The version number is shown at the bottom of the page.
-- **Power saving:** with nothing playing, the emulator pauses after 10 minutes without mouse or
-  keyboard input, or after 5 minutes in the background, so that it is not running when the computer
-  goes to sleep. A click or a key goes on where it was. This is meant to help with the browser
-  freezing or crashing after the computer slept, which came up in testing. The cause is not
-  confirmed yet; please report if it still happens.
-- **Recovery:** if the audio stops while the page is shown (for example after the computer slept),
-  the emulator starts it again by itself, rebooting from the SD card if needed. If the firmware stops
-  with an error, the status line says so and **Reboot** brings it back, instead of a page that just
-  stops.
+- The version and the build are shown at the bottom of the page (for example
+  "Version 0.2.0 · 933bd9f").
+- **Power saving:** with nothing playing, the emulated device pauses after 10 minutes without mouse
+  or keyboard input, or after 5 minutes in the background. A click or a key goes on where it was.
+
+#### Fixes
+
+- **The page stopped after being left alone, and reloading it then hung or crashed the browser.**
+  The emulator's audio stopped working after the browser had stopped and restarted it: the display
+  froze, there was no sound, and a reload hung. In testing this happened after the computer slept
+  and after the automatic pause, which stopped the browser's audio too. It reproduced in Chromium
+  only some of the time, so it is a timing problem in how the browser restarts audio.
+  - The automatic pause no longer stops the browser's audio. Only the emulated device stops; the
+    audio keeps running, silent.
+  - **Recovery:** if the audio stops anyway while the page is shown (for example after the computer
+    slept), the emulator starts it again by itself within about 20 seconds, rebooting from the SD
+    card if needed. The status line says what happened.
+  - If the firmware stops with an error, the status line shows the error and **Reboot** brings it
+    back, instead of a page that just stops.
+  - The scenario that failed (10 minutes idle, the automatic pause, a click, then several reloads)
+    now works. A real computer going to sleep could not be tested here; please report if the page
+    still stops after that.
+- **Updates:** after an update, the browser could use a cached file of the old version together with
+  the new page. All files of one build are now loaded together.
 
 #### Upgrading
 
@@ -167,9 +181,17 @@ First public version.
 
 - **语言**：浏览器的第一语言是中文时页面显示中文，其他情况显示英文。右上角的按钮可以切换，选择会被记住。按钮、菜单和读屏标签都已翻译；BPM、Swing、Retrig、页名等设备术语，以及固件屏幕上的文字，保持和真机一致。
 - 改变 LFO 的目标声部时，调制目标会换成新声部上的同一个参数，和真机菜单的做法一样。
-- 页面底部显示版本号。
-- **省电**：没有播放时，10 分钟没有鼠标或键盘操作，或者页面在后台放了 5 分钟，模拟器会暂停，这样电脑休眠时它不在运行。点击页面或按任意键就从原处继续。这是为了解决测试中遇到的电脑休眠后浏览器卡死或崩溃的问题，原因还没有确认；如果还会发生，请告诉我。
-- **自动恢复**：页面显示时如果音频停了（例如电脑休眠之后），模拟器会自己重新启动音频，必要时从 SD 卡重新开机。固件出错停止时，状态栏会显示错误，点“重启”即可恢复，不会再停在一个没反应的页面上。
+- 页面底部显示版本和构建号（例如"版本 0.2.0 · 933bd9f"）。
+- **省电**：没有播放时，10 分钟没有鼠标或键盘操作，或者页面在后台放了 5 分钟，模拟的设备会暂停。点击页面或按任意键就从原处继续。
+
+#### 修复
+
+- **页面放一段时间不用就死掉，重新载入时浏览器卡住或崩溃。** 浏览器把音频停掉再重新启动后，模拟器的音频就不工作了：屏幕冻住、没有声音，重新载入页面会卡住。测试中，电脑休眠之后会出现，自动暂停之后也会出现（当时的自动暂停也会停掉浏览器的音频）。在 Chromium 里只是有时能复现，所以是浏览器重启音频时的时序问题。
+  - 自动暂停不再停掉浏览器的音频，只让模拟的设备停住，音频照常运行（静音）。
+  - **自动恢复**：如果页面显示时音频还是停了（例如电脑休眠之后），模拟器会在大约 20 秒内自己重新启动音频，必要时从 SD 卡重新开机，状态栏会说明发生了什么。
+  - 固件出错停止时，状态栏会显示错误，点"重启"即可恢复，不会再停在一个没反应的页面上。
+  - 原来会失败的场景（空闲 10 分钟、自动暂停、点击继续、再连续重新载入几次）现在都正常。真实的电脑休眠这里没法测试；如果休眠之后页面还会死掉，请告诉我。
+- **更新**：更新之后，浏览器可能把缓存里旧版本的文件和新页面混在一起用。现在同一个构建的文件总是一起载入。
 
 #### 如何升级
 
