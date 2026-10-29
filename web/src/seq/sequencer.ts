@@ -220,6 +220,9 @@ export class Sequencer {
   setLive(on: boolean) {
     this.live = on;
     this.root.classList.toggle('off', !on);
+    // a boot clears the firmware's mutes, so a solo from before is gone
+    this.solo.clear();
+    this.preSoloMutes = null;
     if (on) this.emu.seqView(255);
     this.render();
   }
@@ -227,6 +230,11 @@ export class Sequencer {
   setData(d: SeqData, ack: number) {
     if (ack < this.ack) return;   // older than an edit in flight: the next one has it
     this.data = d;
+    // mutes changed elsewhere (the panel, a reboot): the solo no longer holds
+    if (this.solo.size && d.mutes !== this.soloMask()) {
+      this.solo.clear();
+      this.preSoloMutes = null;
+    }
     this.render();
   }
 
@@ -787,9 +795,14 @@ export class Sequencer {
       this.preSoloMutes = null;
       return;
     }
+    this.setMutes(this.soloMask());
+  }
+
+  /** The mutes a solo means: every track that is not soloed. */
+  private soloMask(): number {
     let mask = 0;
     for (let i = 0; i < TRACKS; i++) if (!this.solo.has(i)) mask |= 1 << i;
-    this.setMutes(mask);
+    return mask;
   }
 
   /* track actions */
