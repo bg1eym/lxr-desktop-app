@@ -119,8 +119,11 @@ set(EMU_SOURCES
     ${EMU}/platform.c
     ${EMU}/card_io.c
 )
+# The exported API. In the WebAssembly build these go straight into the
+# module: from a static library the linker would drop what nothing calls.
+set(EMU_API_SOURCES ${EMU}/api.c ${EMU}/seq_api.c)
 if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
-    list(APPEND EMU_SOURCES ${EMU}/api.c)
+    list(APPEND EMU_SOURCES ${EMU_API_SOURCES})
 endif()
 
 add_library(lxr_core STATIC ${FW_SOURCES} ${EMU_SOURCES})
@@ -149,8 +152,8 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     # A reactor module (no main): the AudioWorklet instantiates it, calls
     # _initialize and then the lxr_* functions. Only the API is exported.
     target_compile_options(lxr_core PRIVATE -fvisibility=hidden)
-    add_executable(lxr_emu ${EMU}/api.c)
-    set_source_files_properties(${EMU}/api.c TARGET_DIRECTORY lxr_emu PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+    add_executable(lxr_emu ${EMU_API_SOURCES})
+    set_source_files_properties(${EMU_API_SOURCES} TARGET_DIRECTORY lxr_emu PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden;-Wno-macro-redefined")
     target_link_libraries(lxr_emu PRIVATE lxr_core)
     set_target_properties(lxr_emu PROPERTIES SUFFIX ".wasm")
     target_link_options(lxr_emu PRIVATE

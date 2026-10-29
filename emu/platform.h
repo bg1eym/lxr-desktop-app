@@ -35,4 +35,7 @@ uint32_t emu_millis(void);
 
 void USART3_IRQHandler(void);
 
+/* seq_api.c: runs at the start of every block. */
+void seq_api_block(void);
+
 #endif

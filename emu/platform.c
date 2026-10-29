@@ -501,6 +501,8 @@ void emu_main_loop_iteration(void)
  * (main out) and DAC 2, OUTPUT_DMA_SIZE frames each. */
 void emu_render_block(int16_t *out1, int16_t *out2)
 {
+	seq_api_block();
+
 	/* time that passes while the previous block plays */
 	tim14_acc += (uint64_t)OUTPUT_DMA_SIZE * TIM14_DEN;
 	ms_acc += (uint64_t)OUTPUT_DMA_SIZE * MS_DEN;
