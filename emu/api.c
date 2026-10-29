@@ -58,7 +58,9 @@ static void apply_input(void)
 
 static void next_block(void)
 {
-	apply_input();
+	/* while blocks of a wait play, the main loop does not run: keep the
+	 * keys for it */
+	if (!emu_backlog()) apply_input();
 	emu_render_block(blk1, blk2);
 	blk_pos = 0;
 }

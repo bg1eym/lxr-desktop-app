@@ -497,13 +497,9 @@ void emu_main_loop_iteration(void)
 	uart_drain_tx();
 }
 
-/* Render the next 64 frames. out1/out2: interleaved stereo int16 of DAC 1
- * (main out) and DAC 2, OUTPUT_DMA_SIZE frames each. */
-void emu_render_block(int16_t *out1, int16_t *out2)
+/* Time that passes while one block plays: the interrupts in their order. */
+static void run_interrupts(void)
 {
-	seq_api_block();
-
-	/* time that passes while the previous block plays */
 	tim14_acc += (uint64_t)OUTPUT_DMA_SIZE * TIM14_DEN;
 	ms_acc += (uint64_t)OUTPUT_DMA_SIZE * MS_DEN;
 	while (tim14_acc >= TIM14_NUM || ms_acc >= MS_NUM) {
@@ -519,11 +515,11 @@ void emu_render_block(int16_t *out1, int16_t *out2)
 			systick_irq();
 		}
 	}
+}
 
-	/* DMA finished one half: the firmware now fills that half
-	 * (HAL_I2S_TxCpltCallback sets bCurrentSampleValid to it). */
-	bCurrentSampleValid = dma_half;
-	emu_main_loop_iteration();
+/* The DMA has played the current half: hand it out and move on. */
+static void finish_block(int16_t *out1, int16_t *out2)
+{
 	if (bCurrentSampleValid != SAMPLE_VALID) {
 		/* the main loop did not get to it (it always does, via
 		 * soundengine_process); the TIM2 interrupt would */
@@ -539,6 +535,77 @@ void emu_render_block(int16_t *out1, int16_t *out2)
 	memcpy(out2, src2, OUTPUT_DMA_SIZE * 2 * sizeof(int16_t));
 	dma_half ^= 1;
 	samples_rendered += OUTPUT_DMA_SIZE;
+}
+
+/* ---- waits inside the main loop ---------------------------------------------
+ * Time moves between main-loop passes, but the firmware sometimes waits for
+ * it within one: screensaver_touch(), on the first key press after two
+ * minutes, spins in while(screensaver_process()) soundengine_process();
+ * until the screensaver's next 0.5 s step. On the device the interrupts run
+ * on meanwhile and soundengine_process() fills each DMA half as it comes
+ * due. Here, once HAL_GetTick() is polled more often than any pass needs,
+ * each further poll lets one block of time pass the same way. The blocks
+ * of the wait are queued and played before the main loop runs again, so
+ * the sound goes on and the clock stays in step with it. */
+#define WAIT_POLLS 256
+#define BACKLOG_BLOCKS 512   /* 0.74 s */
+static int16_t backlog[BACKLOG_BLOCKS][2][OUTPUT_DMA_SIZE * 2];
+static unsigned backlog_rd, backlog_wr;
+static uint8_t in_pass;      /* in the main loop, not in an interrupt */
+static unsigned polls;
+
+void emu_tick_polled(void)
+{
+	if (!in_pass || ++polls < WAIT_POLLS) return;
+	in_pass = 0;
+	if (backlog_wr - backlog_rd < BACKLOG_BLOCKS) {
+		int16_t (*b)[OUTPUT_DMA_SIZE * 2] = backlog[backlog_wr++ % BACKLOG_BLOCKS];
+		finish_block(b[0], b[1]);
+	} else {
+		static int16_t lost[2][OUTPUT_DMA_SIZE * 2];   /* a longer wait drops sound */
+		finish_block(lost[0], lost[1]);
+	}
+	run_interrupts();
+	bCurrentSampleValid = dma_half;
+	in_pass = 1;
+}
+
+unsigned emu_backlog(void) { return backlog_wr - backlog_rd; }
+
+static void pop_backlog(int16_t *out1, int16_t *out2)
+{
+	int16_t (*b)[OUTPUT_DMA_SIZE * 2] = backlog[backlog_rd++ % BACKLOG_BLOCKS];
+	memcpy(out1, b[0], OUTPUT_DMA_SIZE * 2 * sizeof(int16_t));
+	memcpy(out2, b[1], OUTPUT_DMA_SIZE * 2 * sizeof(int16_t));
+}
+
+/* Render the next 64 frames. out1/out2: interleaved stereo int16 of DAC 1
+ * (main out) and DAC 2, OUTPUT_DMA_SIZE frames each. */
+void emu_render_block(int16_t *out1, int16_t *out2)
+{
+	if (backlog_rd != backlog_wr) {   /* played ahead during a wait */
+		pop_backlog(out1, out2);
+		return;
+	}
+
+	seq_api_block();
+	run_interrupts();   /* while the previous block plays */
+
+	/* DMA finished one half: the firmware now fills that half
+	 * (HAL_I2S_TxCpltCallback sets bCurrentSampleValid to it). */
+	bCurrentSampleValid = dma_half;
+	polls = 0;
+	in_pass = 1;
+	emu_main_loop_iteration();
+	in_pass = 0;
+
+	if (backlog_rd == backlog_wr) {
+		finish_block(out1, out2);
+	} else {                          /* the pass waited: its blocks come first */
+		pop_backlog(out1, out2);
+		int16_t (*b)[OUTPUT_DMA_SIZE * 2] = backlog[backlog_wr++ % BACKLOG_BLOCKS];
+		finish_block(b[0], b[1]);
+	}
 }
 
 /* LED bits as sent to the 74HC595 chain, bit n = LED n (enum in

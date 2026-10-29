@@ -91,10 +91,15 @@ uint32_t HAL_RNG_GetRandomNumber(RNG_HandleTypeDef *h)
 
 /* ------------------------------------------------------------------------
  * Time. The only clock is the number of rendered samples: emu/platform.c
- * moves the millisecond counter on as it renders. Blocking delays return at
+ * moves the millisecond counter on as it renders, and also when the
+ * firmware polls it in a loop (emu_tick_polled). Blocking delays return at
  * once, because nothing else runs while the firmware waits. */
 void emu_time_set_ms(uint32_t ms) { emu_ms = ms; }
-uint32_t HAL_GetTick(void) { return emu_ms; }
+uint32_t HAL_GetTick(void)
+{
+	emu_tick_polled();
+	return emu_ms;
+}
 void HAL_Delay(uint32_t ms) { (void)ms; }
 uint32_t HAL_RCC_GetHCLKFreq(void) { return 216000000u; }
 

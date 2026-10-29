@@ -19,6 +19,7 @@ typedef struct {
 int emu_boot(const emu_boot_opts *opts);
 void emu_main_loop_iteration(void);
 void emu_render_block(int16_t *out1, int16_t *out2);
+unsigned emu_backlog(void);   /* blocks rendered ahead during a firmware wait */
 
 void emu_set_jacks(uint8_t mask);
 void emu_set_fader(uint8_t idx, float pos);

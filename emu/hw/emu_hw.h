@@ -26,6 +26,7 @@ uint32_t emu_lcd_state(void);                /* see lcd_emu.c */
 
 void emu_rng_seed(uint32_t seed);
 void emu_time_set_ms(uint32_t ms);
+void emu_tick_polled(void);                 /* emu/platform.c: HAL_GetTick() was read */
 
 /* Virtual SD card (emu/hw/sd_emu.c): a RAM disk with a FAT32 volume made
  * by the firmware's own FatFs. */
