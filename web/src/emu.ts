@@ -26,7 +26,9 @@ type Msg =
   | { t: 'pot'; i: number; deg: number }
   | { t: 'fader'; i: number; v: number }
   | { t: 'jacks'; m: number }
-  | { t: 'param'; i: number; v: number }
+  | { t: 'param'; i: number; v: number; id?: number }
+  | { t: 'selectVoice'; voice: number }
+  | { t: 'describe' }
   | { t: 'midi'; data: number[] }
   | { t: 'seqView'; pattern: number }
   | ({ t: 'seq'; id: number } & SeqEdit)
@@ -68,6 +70,9 @@ export class LxrEmu {
   /** Pattern data of the shown pattern, whenever it changes. ack: the id of
    * the last seqEdit() it includes. */
   onSeq: (data: SeqData, ack: number) => void = () => {};
+  /** All parameter values, whenever one changes. ack: the id of the last
+   * setParam() they include. */
+  onParams: (values: Uint8Array, ack: number) => void = () => {};
   /** The card was written (bytes stored, whether it survives a reload). */
   onCard: (bytes: number, persistent: boolean) => void = () => {};
 
@@ -78,6 +83,8 @@ export class LxrEmu {
   private faders = [1, 1, 1, 1, 1, 1];
   private syncId = 0;
   private seqId = 0;
+  private paramId = 0;
+  private describeWaiters: ((json: string) => void)[] = [];
   private keepEdits = false;
   private syncWaiters = new Map<number, () => void>();
   private exportWaiters = new Map<number, (m: { files?: [string, boolean, ArrayBuffer | null][]; error?: string }) => void>();
@@ -187,6 +194,7 @@ export class LxrEmu {
         sdChunks,
         importFiles,
         seqAck: this.seqId,
+        paramAck: this.paramId,
       },
     });
     node.connect(this.ctx.destination);
@@ -203,6 +211,8 @@ export class LxrEmu {
           case 'error': reject(new Error(m.msg)); break;
           case 'state': this.onState(m as PanelState); break;
           case 'seq': this.onSeq(parseSnapshot(m.data), m.ack); break;
+          case 'params': this.onParams(m.v, m.ack); break;
+          case 'describe': for (const w of this.describeWaiters.splice(0)) w(m.json); break;
           case 'load': this.onLoad(m.load); break;
           case 'log': this.onLog(m.s); break;
           case 'cardFiles': this.exportWaiters.get(m.id)?.(m); this.exportWaiters.delete(m.id); break;
@@ -241,5 +251,20 @@ export class LxrEmu {
   }
   /** Preview a voice. */
   trigger(voice: number, velocity = 110) { this.send({ t: 'trigger', voice, velocity }); }
-  setParam(i: number, v: number) { this.send({ t: 'param', i, v }); }
+  /** Set a parameter as the menu does. Returns the change's id. */
+  setParam(i: number, v: number): number {
+    const id = ++this.paramId;
+    this.send({ t: 'param', i, v, id });
+    return id;
+  }
+  /** Make a voice the panel's active one, where its voice button would just select it. */
+  selectVoice(voice: number) { this.send({ t: 'selectVoice', voice }); }
+  /** The firmware's sound menus (emu/param_api.c), as JSON. */
+  describe(): Promise<string> {
+    if (!this.node) return Promise.reject(new Error('not running'));
+    return new Promise((resolve) => {
+      this.describeWaiters.push(resolve);
+      this.send({ t: 'describe' });
+    });
+  }
 }

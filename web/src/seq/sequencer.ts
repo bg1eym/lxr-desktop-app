@@ -1,8 +1,9 @@
 /*
  * LXR-02 Emu (unofficial) - step sequencer editor.
  *
- * Shows the playing pattern as a grid of the 7 tracks, a lane for one value
- * of the selected track, and an inspector for the selected steps. It edits
+ * Shows the playing pattern as a grid of the 7 tracks and, below it, a lane
+ * for one value of the selected track's steps. The sound panel of the
+ * selected track's voice goes to the right (see sound/editor.ts). It edits
  * the firmware's own pattern data (emu/seq_api.c), so the panel, the display
  * and the SD card see the same pattern; the grid in turn shows edits made on
  * the panel.
@@ -11,9 +12,9 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 import type { LxrEmu, SeqEdit } from '../emu';
-import { currentLang, onLang, t, type Key } from '../i18n';
+import { onLang, t, type Key } from '../i18n';
 import {
-  NO_LOCK, NUDGE_ZERO, PATTERNS, RETRIG, STEPS, TRACKS,
+  NUDGE_ZERO, PATTERNS, RETRIG, STEPS, TRACKS,
   blankStep, cloneStep, hasLock, lockWrite, noteName, patternName, sameStep, stepWrite,
   type SeqData, type Step,
 } from './model';
@@ -28,7 +29,7 @@ const KEEP_KEY = 'lxr02-emu-keep-edits';
 
 export const TRACK_NAMES = ['DRUM 1', 'DRUM 2', 'DRUM 3', 'SNARE', 'CYMBAL', 'HH CLOSED', 'HH OPEN'];
 const ROW_NAMES = ['DRUM 1', 'DRUM 2', 'DRUM 3', 'SNARE', 'CYMBAL', 'HH CLS', 'HH OPN'];   // as on the panel
-const TRACK_COLORS = ['#ff7a45', '#ffa940', '#ffd25e', '#ff5d8f', '#b48cff', '#4fd1c5', '#63b3ed'];
+export const TRACK_COLORS = ['#ff7a45', '#ffa940', '#ffd25e', '#ff5d8f', '#b48cff', '#4fd1c5', '#63b3ed'];
 
 type Lane = 'vel' | 'prob' | 'retrig' | 'nudge' | 'note';
 const LANES: [Lane, Key][] = [
@@ -151,7 +152,7 @@ export class Sequencer {
   private page = 0;
   private follow = true;
   private track = 0;               // selected track
-  private sel = new Set<number>(); // selected steps of that track
+  private sel = new Set<number>([0]); // selected steps of that track
   private anchor = 0;              // last clicked step, for keyboard moves
   private lane: Lane = 'vel';
   private keep = loadKeep();
@@ -183,33 +184,29 @@ export class Sequencer {
   private barLabel = el('span', 'seq-bar-label');
   private overview = el('canvas', 'seq-overview');
 
-  /* grid, lane, inspector */
+  /* grid, lane */
   private rows: TrackRow[] = [];
   private grid = el('div', 'seq-grid');
   private laneTabs: HTMLButtonElement[] = [];
   private laneBars: { root: HTMLDivElement; bar: HTMLDivElement; label: HTMLSpanElement }[] = [];
   private laneArea = el('div', 'seq-lane-steps');
   private laneName = el('div', 'seq-lane-name');
-  private insp = el('aside', 'seq-insp');
   private pop: HTMLElement | null = null;
-  private inspSig = '';
-  private inspBusy = false;        // pointer down in the inspector
+
+  /** Right of the grid: the sound panel goes here. */
+  readonly side = el('aside', 'seq-side');
+  /** The selected track changed. */
+  onTrack: (track: number) => void = () => {};
 
   constructor(private emu: LxrEmu) {
     this.root = el('section', 'seq off');
     this.root.setAttribute('aria-label', 'Sequencer');
-    this.root.append(this.buildToolbar(), el('div', 'seq-body', this.buildMain(), this.insp));
+    this.root.append(this.buildToolbar(), el('div', 'seq-body', this.buildMain(), this.side));
     this.emu.seqEdit({ keep: this.keep });
     this.bindKeys();
     onLang(() => this.render());
     document.addEventListener('pointerdown', (e) => {
       if (this.pop && !this.pop.contains(e.target as Node)) this.closePop();
-    });
-    this.insp.addEventListener('pointerdown', () => { this.inspBusy = true; });
-    window.addEventListener('pointerup', () => {
-      if (!this.inspBusy) return;
-      this.inspBusy = false;
-      this.renderInspector();
     });
   }
 
@@ -382,7 +379,7 @@ export class Sequencer {
     name.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       this.emu.trigger(tr, 110);
-      if (this.track !== tr) { this.track = tr; this.sel.clear(); this.render(); }
+      if (this.track !== tr) { this.setTrack(tr); this.render(); }
     });
     const mute = btn('seq-ms', 'M');
     const solo = btn('seq-ms', 'S');
@@ -433,7 +430,18 @@ export class Sequencer {
     this.renderToolbar();
     this.renderGrid();
     this.renderLane();
-    this.renderInspector();
+  }
+
+  get selectedTrack(): number {
+    return this.track;
+  }
+
+  /** Select a track, keeping the selected step positions. */
+  private setTrack(tr: number) {
+    if (tr === this.track) return;
+    this.track = tr;
+    if (!this.sel.size) this.sel.add(this.anchor);
+    this.onTrack(tr);
   }
 
   private renderToolbar() {
@@ -585,136 +593,6 @@ export class Sequencer {
       }
       label.textContent = s.on ? laneLabel(s, this.lane) : '';
     }
-  }
-
-  /** Rebuilt only when what it shows changes, and not while it is in use:
-   * the data coming back from an edit is the same the inspector shows. */
-  private renderInspector() {
-    const box = this.insp;
-    const d = this.data;
-    const steps = [...this.sel].sort((a, b) => a - b);
-    const tr = this.track;
-    const sig = [currentLang(), this.live, tr, steps.join(','),
-      d ? steps.map((i) => JSON.stringify(d.steps[tr][i])).join('|') : ''].join('#');
-    if (sig === this.inspSig || this.inspBusy) return;
-    this.inspSig = sig;
-    box.replaceChildren();
-    if (!d || !steps.length) {
-      box.append(
-        el('h3', '', t('seqInspector')),
-        el('p', 'seq-hint', t('seqNoSelection')),
-        el('p', 'seq-hint', t('seqKeysHelp')));
-      return;
-    }
-    const first = d.steps[tr][steps[0]];
-    const all = steps.map((i) => d.steps[tr][i]);
-    const mixed = (f: (s: Step) => number | boolean) => all.some((s) => f(s) !== f(first));
-    const title = steps.length === 1
-      ? t('seqStepTitle', { track: TRACK_NAMES[tr], n: steps[0] + 1 })
-      : t('seqStepsTitle', { track: TRACK_NAMES[tr], n: steps.length });
-    const h = el('h3', '', el('span', 'seq-swatch'), title);
-    h.style.setProperty('--c', TRACK_COLORS[tr]);
-    box.append(h);
-
-    const edit = (key: string, f: (s: Step) => void) => {
-      const g = this.begin(`insp-${key}-${tr}-${steps.join(',')}`);
-      for (const i of steps) this.editStep(tr, i, f, g);
-      this.flush();
-      this.renderGrid();
-      this.renderLane();
-      this.renderToolbar();
-    };
-
-    // on / off
-    const onBtn = btn('seq-big' + (first.on ? ' on' : ''), t(first.on ? 'seqOn' : 'seqOff'));
-    if (mixed((s) => s.on)) onBtn.textContent = t('seqMixed');
-    onBtn.addEventListener('click', () => {
-      const v = !first.on || mixed((s) => s.on);
-      edit('on', (s) => { s.on = v; });
-      this.renderInspector();
-    });
-    box.append(this.field(t('seqStep'), onBtn));
-
-    // velocity and probability
-    box.append(this.slider(t('seqVelocity'), 0, 127, first.vel, mixed((s) => s.vel), (v) => String(v), (v) => edit('vel', (s) => { s.vel = v; })));
-    box.append(this.slider(t('seqProb'), 0, 100, first.prob, mixed((s) => s.prob), (v) => `${v}%`, (v) => edit('prob', (s) => { s.prob = v; })));
-
-    // retrig
-    const seg = el('div', 'seq-seg');
-    RETRIG.forEach((name, r) => {
-      const b = btn('seq-segb' + (!mixed((s) => s.retrig) && first.retrig === r ? ' on' : ''), r ? name : t('seqRetrigOff'));
-      b.addEventListener('click', () => { edit('retrig', (s) => { s.retrig = r; }); this.renderInspector(); });
-      seg.append(b);
-    });
-    box.append(this.field(t('seqRetrig'), seg));
-
-    // nudge
-    box.append(this.slider(t('seqNudge'), -7, 7, first.nudge - NUDGE_ZERO, mixed((s) => s.nudge),
-      (v) => (v ? t('seqNudgeValue', { n: v > 0 ? `+${v}` : `−${-v}` }) : t('seqNudgeZero')),
-      (v) => edit('nudge', (s) => { s.nudge = v + NUDGE_ZERO; })));
-
-    // note
-    const noteVal = el('span', 'seq-value seq-note', mixed((s) => s.note) ? t('seqMixed') : `${noteName(first.note)} · ${first.note}`);
-    const noteBtns = el('div', 'seq-seg');
-    for (const [label, dn] of [['−12', -12], ['−1', -1], ['+1', 1], ['+12', 12]] as [string, number][]) {
-      const b = btn('seq-segb', label);
-      b.addEventListener('click', () => { edit('note', (s) => { s.note = clamp(s.note + dn, 0, 127); }); this.renderInspector(); });
-      noteBtns.append(b);
-    }
-    const noteReset = btn('seq-segb', noteName(60));
-    noteReset.title = t('seqNoteReset');
-    noteReset.addEventListener('click', () => { edit('note', (s) => { s.note = 60; }); this.renderInspector(); });
-    noteBtns.append(noteReset);
-    box.append(this.field(t('seqNote'), el('div', 'seq-stack', noteVal, noteBtns)));
-
-    // parameter locks (read only for now)
-    const locks = el('div', 'seq-locks');
-    if (steps.length === 1) {
-      const s = first;
-      const list: string[] = [];
-      if (s.p1 !== NO_LOCK) list.push(t('seqLock', { nr: s.p1, v: s.p1v }));
-      if (s.p2 !== NO_LOCK) list.push(t('seqLock', { nr: s.p2, v: s.p2v }));
-      locks.append(list.length ? list.join(' · ') : t('seqNoLocks'));
-    } else {
-      locks.append(t(all.some(hasLock) ? 'seqSomeLocks' : 'seqNoLocks'));
-    }
-    if (all.some(hasLock)) {
-      const clr = btn('seq-tool seq-small', t('seqClearLocks'));
-      clr.addEventListener('click', () => {
-        edit('locks', (s) => { s.p1 = NO_LOCK; s.p1v = 0; s.p2 = NO_LOCK; s.p2v = 0; });
-        this.renderInspector();
-      });
-      locks.append(clr);
-    }
-    box.append(this.field(t('seqLocks'), locks));
-
-    const reset = btn('seq-tool', t('seqResetStep'));
-    reset.addEventListener('click', () => {
-      edit('reset', (s) => { Object.assign(s, { ...blankStep(), volFlag: s.volFlag }); });
-      this.renderInspector();
-    });
-    box.append(el('div', 'seq-insp-actions', reset));
-  }
-
-  private field(label: string, control: Node): HTMLElement {
-    return el('div', 'seq-field', el('span', 'seq-flabel', label), control);
-  }
-
-  private slider(label: string, min: number, max: number, value: number, mixed: boolean,
-    fmt: (v: number) => string, set: (v: number) => void): HTMLElement {
-    const input = el('input', 'seq-range');
-    input.type = 'range';
-    input.min = String(min);
-    input.max = String(max);
-    input.value = String(value);
-    const out = el('span', 'seq-value', mixed ? t('seqMixed') : fmt(value));
-    input.addEventListener('input', () => {
-      const v = Number(input.value);
-      out.textContent = fmt(v);
-      set(v);
-    });
-    input.addEventListener('change', () => this.endGesture());
-    return this.field(label, el('div', 'seq-stack seq-row-ctl', input, out));
   }
 
   /* ---- editing ------------------------------------------------------------- */
@@ -958,7 +836,7 @@ export class Sequencer {
   }
 
   private select(tr: number, steps: number[], anchor = steps[0]) {
-    this.track = tr;
+    this.setTrack(tr);
     this.sel = new Set(steps);
     this.anchor = anchor ?? 0;
   }
@@ -980,9 +858,8 @@ export class Sequencer {
       e.preventDefault();
       g.focus({ preventScroll: true });
       if (e.shiftKey) {
-        if (hit.tr !== this.track) this.sel.clear();
-        this.track = hit.tr;
-        if (this.sel.has(hit.i)) this.sel.delete(hit.i); else this.sel.add(hit.i);
+        if (hit.tr !== this.track) { this.setTrack(hit.tr); this.sel.clear(); }
+        if (this.sel.has(hit.i) && this.sel.size > 1) this.sel.delete(hit.i); else this.sel.add(hit.i);
         this.anchor = hit.i;
         this.render();
         return;
@@ -1073,7 +950,6 @@ export class Sequencer {
       if (!last) return;
       last = null;
       this.endGesture();
-      this.renderInspector();
     };
     a.addEventListener('pointerup', end);
     a.addEventListener('pointercancel', end);
@@ -1122,8 +998,8 @@ export class Sequencer {
         case 'ArrowUp':
         case 'ArrowDown':
           if (mod) { handled = false; break; }
-          this.track = clamp(this.track + (e.key === 'ArrowUp' ? -1 : 1), 0, TRACKS - 1);
-          this.sel = new Set(steps.length ? [this.anchor] : []);
+          this.setTrack(clamp(this.track + (e.key === 'ArrowUp' ? -1 : 1), 0, TRACKS - 1));
+          this.sel = new Set([this.anchor]);
           break;
         case 'Enter': {
           if (!steps.length) break;
@@ -1143,7 +1019,7 @@ export class Sequencer {
           break;
         }
         case 'Escape':
-          this.sel.clear();
+          this.sel = new Set([this.anchor]);
           break;
         default:
           handled = false;

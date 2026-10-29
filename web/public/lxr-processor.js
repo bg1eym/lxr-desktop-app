@@ -54,6 +54,8 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.seqView = 255;      /* pattern shown by the page; 255 = the playing one */
 		this.lastSeq = null;
 		this.seqAck = 0;         /* id of the last sequencer edit done, counted by the page */
+		this.paramAck = 0;       /* the same for parameter changes */
+		this.lastParams = null;
 		this.port.onmessage = (e) => {
 			if (this.x) this.handle(e.data); else this.pending.push(e.data);
 		};
@@ -61,8 +63,9 @@ class LxrProcessor extends AudioWorkletProcessor {
 		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs.
 		 * importFiles: instead, a card to build from files, [path, isDir,
 		 * ArrayBuffer | null] triples. */
-		const { wasm, seed, sdMegabytes, sdChunks, importFiles, seqAck } = options.processorOptions;
+		const { wasm, seed, sdMegabytes, sdChunks, importFiles, seqAck, paramAck } = options.processorOptions;
 		this.seqAck = seqAck || 0;
+		this.paramAck = paramAck || 0;
 		const imports = { wasi_snapshot_preview1: wasiImports(() => this.x.memory, (s) => this.port.postMessage({ t: 'log', s })) };
 		WebAssembly.instantiate(wasm, imports).then(({ instance }) => {
 			const x = instance.exports;
@@ -99,7 +102,21 @@ class LxrProcessor extends AudioWorkletProcessor {
 		case 'pot': x.lxr_pot_turn(m.i, m.deg | 0); break;
 		case 'fader': x.lxr_set_fader(m.i, m.v); break;
 		case 'jacks': x.lxr_set_jacks(m.m); break;
-		case 'param': x.lxr_set_param(m.i, m.v); break;
+		case 'param':
+			x.lxr_set_param(m.i, m.v);
+			if (m.id) { this.paramAck = m.id; this.checkParams(true); }
+			break;
+		case 'selectVoice': x.lxr_select_voice(m.voice); break;
+		case 'describe': {
+			const p = x.lxr_ui_describe();
+			const mem = new Uint8Array(x.memory.buffer);
+			let end = p;
+			while (mem[end]) end++;
+			let json = '';
+			for (let i = p; i < end; i += 4096) json += String.fromCharCode.apply(null, mem.subarray(i, Math.min(end, i + 4096)));
+			this.port.postMessage({ t: 'describe', json });
+			break;
+		}
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
 		case 'syncSd': this.syncSd(m.id); break;
 		case 'seqView': this.seqView = m.pattern; this.lastSeq = null; break;
@@ -192,6 +209,23 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.checkSeq(true);
 	}
 
+	/* Send all parameter values when one changed: knobs on the panel, a
+	 * kit load or the page. */
+	checkParams(force) {
+		const x = this.x;
+		const n = x.lxr_num_params();
+		const v = new Uint8Array(x.memory.buffer, x.lxr_params(), n);
+		const last = this.lastParams;
+		if (last && !force) {
+			let same = true;
+			for (let i = 0; i < n; i++) if (v[i] !== last[i]) { same = false; break; }
+			if (same) return;
+		}
+		this.lastParams = v.slice();
+		const out = v.slice();
+		this.port.postMessage({ t: 'params', v: out, ack: this.paramAck }, [out.buffer]);
+	}
+
 	/* Send the shown pattern's data when it changed (edits from the page, the
 	 * virtual panel or MIDI all end up here). */
 	checkSeq(force) {
@@ -252,6 +286,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		if (++this.quanta % STATE_EVERY === 0) this.postState();
 		if (this.quanta % SD_EVERY === 0) this.syncSd();
 		if (this.quanta % SEQ_EVERY === 0) this.checkSeq();
+		if (this.quanta % SEQ_EVERY === 4) this.checkParams();
 		if (this.renderQuanta >= 1034) {   /* about every 3 s: Date.now() only has 1 ms steps */
 			const audioMs = this.renderQuanta * QUANTUM / sampleRate * 1000;
 			this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });

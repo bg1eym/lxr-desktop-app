@@ -12,6 +12,7 @@ import { currentLang, onLang, setLang, t, text, type Key } from './i18n';
 import { cardDialog } from './cardDialog';
 import { makeZip, readFolder, readZip, writeFolder } from './cardFiles';
 import { Sequencer } from './seq/sequencer';
+import { SoundEditor } from './sound/editor';
 
 /* Button and LED numbers: enum ButtonNumbers (Core/Inc/buttonHandler.h) and
  * the LED enum (Core/Inc/ledHandler.h) share the shift register layout. */
@@ -34,6 +35,12 @@ const SOURCE_URL = 'https://github.com/bg1eym/lxr-desktop-app/tree/emu';
 const emu = new LxrEmu();
 const buttons = new Map<number, PanelButton>();
 const seq = new Sequencer(emu);
+const sound = new SoundEditor(emu);
+seq.side.append(sound.root);
+seq.onTrack = (track) => {
+  sound.setVoice(track);
+  emu.selectVoice(track);   // the display and the knobs follow, where the voice button would
+};
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -175,6 +182,7 @@ emu.onState = (s: PanelState) => {
   seq.setTransport(s.playheads, s.run !== 0);
 };
 emu.onSeq = (d, ack) => seq.setData(d, ack);
+emu.onParams = (v, ack) => sound.setParams(v, ack);
 emu.onLoad = (l) => { load.textContent = `DSP ≈ ${(l * 100).toFixed(1)}%`; };
 emu.onCard = (bytes, persistent) => {
   const mb = (bytes / 1048576).toFixed(1);
@@ -184,6 +192,7 @@ emu.onCard = (bytes, persistent) => {
 
 async function power(how: 'start' | 'reboot' | 'erase') {
   seq.setLive(false);
+  sound.setLive(false);
   startBtn.disabled = true;
   rebootBtn.disabled = true;
   eraseBtn.disabled = true;
@@ -196,6 +205,9 @@ async function power(how: 'start' | 'reboot' | 'erase') {
     overlay.hidden = true;
     device.classList.add('live');
     seq.setLive(true);
+    sound.setLive(true);
+    await sound.load();
+    emu.selectVoice(seq.selectedTrack);
     rebootBtn.disabled = false;
     eraseBtn.disabled = false;
     cardBtn.disabled = false;
@@ -212,6 +224,7 @@ eraseBtn.addEventListener('click', () => {
 });
 const sdDialog = cardDialog(emu, (bootMs) => {
   setStatus('statusRunning', { rate: emu.sampleRate, ms: bootMs });
+  sound.load();   // the samples on the new card are in the waveform menus
 });
 document.body.append(sdDialog);
 cardBtn.addEventListener('click', () => sdDialog.showModal());
@@ -254,4 +267,4 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => shiftBtn.set(false));
 
 // for automated checks
-(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN, seq, cardFiles: { readFolder, writeFolder, makeZip, readZip } };
+(window as unknown as { lxr: unknown }).lxr = { emu, lcd, buttons, BTN, seq, sound, cardFiles: { readFolder, writeFolder, makeZip, readZip } };
