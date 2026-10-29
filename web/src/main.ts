@@ -285,7 +285,7 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     hiddenSince = performance.now();
-    emu.syncCard();
+    emu.syncCard(true);
   } else {
     wake();
   }

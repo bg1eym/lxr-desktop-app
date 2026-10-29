@@ -118,7 +118,7 @@ export class LxrEmu {
 
   /** Power cycle with the card in: what was saved on it is kept. */
   async reboot(): Promise<{ bootMs: number }> {
-    await this.syncCard();
+    await this.syncCard(true);
     return this.boot();
   }
 
@@ -133,7 +133,7 @@ export class LxrEmu {
   /** Every file and directory on the virtual card, as the firmware's FatFs sees it. */
   async exportCard(): Promise<CardFile[]> {
     if (!this.node) throw new Error('not running');
-    await this.syncCard();
+    await this.syncCard(true);
     const id = ++this.syncId;
     const m = await new Promise<{ files?: [string, boolean, ArrayBuffer | null][]; error?: string }>((resolve) => {
       this.exportWaiters.set(id, resolve);
@@ -157,14 +157,16 @@ export class LxrEmu {
     return r;
   }
 
-  /** Fetch everything written to the card so far and store it. */
-  syncCard(): Promise<void> {
+  /** Fetch everything written to the card so far and store it. With save,
+   * the firmware first writes the current pattern and kit to /TMP, as its
+   * autosave would (it waits for the sequencer to stop). */
+  syncCard(save = false): Promise<void> {
     if (!this.node) return Promise.resolve();
     const id = ++this.syncId;
     return new Promise<void>((resolve) => {
       const timer = setTimeout(() => { this.syncWaiters.delete(id); resolve(); }, 1000);
       this.syncWaiters.set(id, () => { clearTimeout(timer); resolve(); });
-      this.node!.port.postMessage({ t: 'syncSd', id });
+      this.node!.port.postMessage({ t: 'syncSd', id, save });
     });
   }
 
@@ -176,7 +178,7 @@ export class LxrEmu {
    * where it was; the device's time follows the rendered samples. */
   async pause(): Promise<void> {
     if (!this.node || this.idle) return;
-    await this.syncCard();
+    await this.syncCard(true);
     this.idle = true;
     this.send({ t: 'idle', on: true });
   }

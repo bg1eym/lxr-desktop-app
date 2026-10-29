@@ -111,6 +111,22 @@ API int lxr_card_import_begin(void) { return booted ? -2 : card_import_begin(); 
 API int lxr_card_import_file(uint32_t len, int is_dir) { return booted ? -2 : card_import_file(len, is_dir); }
 API int lxr_card_import_end(void) { return booted ? -2 : card_import_end(); }
 
+/* presetManager.c, not in its header: the autosave of preset_processTimer(). */
+FRESULT preset_saveTmpPat(void);
+FRESULT preset_saveTmpKit(void);
+
+/* Write the current pattern and kit to /TMP now, as the autosave does 2 s
+ * after a change. The firmware cancels a pending pattern save when the
+ * sequencer starts and saves again on stop, so a reboot while playing would
+ * lose pattern edits made just before pressing play (as switching the
+ * device off would). Used before a reboot and when the page goes away. */
+API void lxr_save_now(void)
+{
+	if (!booted) return;
+	preset_saveTmpPat();
+	preset_saveTmpKit();
+}
+
 /* ---- SD card image (saving/restoring in the browser) ---------------------- */
 API uint32_t lxr_sd_chunk_size(void) { return emu_sd_chunk_size(); }
 API uint32_t lxr_sd_num_chunks(void) { return emu_sd_num_chunks(); }

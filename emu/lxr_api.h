@@ -80,6 +80,7 @@ void lxr_set_param(int idx, int value);
 const char *lxr_ui_describe(void);
 const uint8_t *lxr_params(void);
 int lxr_select_voice(uint8_t voice);
+void lxr_save_now(void);
 
 void lxr_set_main_step(uint8_t pattern, uint8_t voice, uint8_t step, uint8_t on);
 int lxr_get_main_step(uint8_t pattern, uint8_t voice, uint8_t step);

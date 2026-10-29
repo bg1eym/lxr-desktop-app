@@ -153,7 +153,10 @@ class LxrProcessor extends AudioWorkletProcessor {
 			break;
 		}
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
-		case 'syncSd': this.syncSd(m.id); break;
+		case 'syncSd':
+			if (m.save) x.lxr_save_now();   /* the autosave, now: before a reboot or leaving */
+			this.syncSd(m.id);
+			break;
 		case 'idle': this.idle = !!m.on; this.idleQuanta = 0; break;
 		case 'ack':
 			this.busy[m.k] = 0;
