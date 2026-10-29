@@ -249,3 +249,26 @@ Settings → Pages → Source 必须是 **GitHub Actions**。设成"Deploy from 
   - 写入文件夹再读回（用浏览器的私有文件系统测）：结果一致；
   - Finder 风格的 zip 导入正常。
 - 还没做：用 Qiang 真机 SD 卡的拷贝做往返测试；把导出的卡插回真机验证能否读取。
+
+### 新界面第一步：音序器 —— 已完成
+
+和 Qiang 讨论后，新界面分两块：音序器（上）和音色设置（下，第二步再做），尺寸按 Mac 上的 Chrome 设计，常用操作偏向 Techno。第一步只做音序器。真机面板保留在下面。
+
+- **固件这边（`emu/seq_api.c`）**：直接读写固件自己的 `seq_patternSet`，写法和前面板的步进编辑一样（`seq_setMainStep()` 开关步，`Step`/`StepTiming` 的字段直接赋值，然后 `preset_touchTimer(PRESET_PAT_TIMER)`，2 秒后固件自己存到 `/TMP/TMP.PAT`）。换 pattern 走 `SEQ_CHANGE_PAT`，和 pattern 按键相同。
+  - 快照：20 字节头（显示的 pattern、正在播放的、待切换的、是否在播放、静音位、pattern 存的 swing、kit、BPM、7 个轨道长度、当前 swing、"有未保存改动"），后面是 7 轨 × 64 步、每步 12 字节。AudioWorklet 每 8 个 quantum（约 23 ms）比较一次，有变化才发给页面，所以面板上的改动也会出现在网格里。
+  - 页面的每次修改带编号，快照带上已经处理到的编号；页面不理会比自己发出的修改更旧的快照，避免拖动时闪回。
+- **真机的一个行为（`seq_setPendingPatternActive()`）**：正在播放的 pattern 改完不保存就切走，固件会用开始播放时的备份（`patternBackupBuffer`）把它还原，改动就没了，只有 SAVE 才会保留。网页上照样保留这个行为，但加了"保留修改"开关（默认打开，存在 `localStorage`）：
+  - 打开时，在切换真正发生之前，把当前的工作副本复制成备份（`seq_copyPatternToBackupBuffer()`，在 `emu_render_block()` 一开始调用 `seq_api_block()`，因为切换只在 `seq_tick()` 里发生，页面的修改只在两个 block 之间到达）；切换完成后再像 SAVE 一样写一次 pattern 文件（`preset_savePatternSD()`，写进当前目录，也就是 `/TMP`）。
+  - 关掉时和真机完全一样。
+  - "保存"按钮（⌘S）等于 SAVE 页存到当前槽位：`seq_patternSet.shuffle` ← 当前 swing，`preset_savePatternRAM()`，`preset_savePatternSD()`。没有照搬按键处理里的 `SKIP_NEXT_KIT_AUTOLOAD`，因为那是给存到别的槽位用的，存到当前槽位时会让下一次换 pattern 不加载 kit。
+  - swing（`PAR_SHUFFLE`=261）固件是按 pattern 存的，但只在 SAVE 时写回 pattern；网页改 swing 时同时写 `seq_patternSet.shuffle[pattern]` 和当前值，切回来时还在。BPM（`PAR_BPM`=272，0 = 外部时钟，1 = MIDI 时钟）走 `menu_parseGlobalParam()`，和面板一样；BPM 不在自动存盘里，重启后回到工程里存的值（和真机一样）。
+  - Node 测试：关掉"保留修改"时，A1 → A2 → A1 后改动消失（和真机一致）；打开时保留，并出现 `/TMP/00-.PAT`；播放中请求切换后、切换前的改动也保留；保存后切走再切回，步和 swing 都在。
+- **网页（`web/src/seq/`）**：`model.ts` 解析快照；`sequencer.ts` 是界面：
+  - 工具栏：播放/停止（按 START 键）、BPM（输入、滚轮、Tap）、swing、pattern（A1–D16 弹出选择、前后切换、播放中显示"下一个"并闪烁）、"已修改"、保存、保留修改、撤销/重做。
+  - 4 小节总览条（7 轨 × 64 步，带播放头），点击选小节；"跟随"让显示跟着播放的小节走。
+  - 7 轨网格：点击开关，拖动连续画（同一轨），Shift 点击或右键只选中；亮度表示力度，角上显示概率、retrig、参数锁，底部小条表示微移；超出轨道长度的步变暗；每轨有自己的播放头（轨道长度可以不同）。
+  - 轨道头：点名字试听并选中，M/S（独奏是用静音实现的，⌘ 点击可独奏多轨），长度 1–64，菜单里有每拍/每八分/反拍/每十六分填充、左右移、力度随机微调、复制/粘贴/清空。
+  - 下方 lane：给选中的轨道画力度、概率、retrig、微移、音高，双击恢复默认。
+  - 右侧检查器：开关、力度、概率、retrig、微移（1/8 步为单位）、音高（±1、±12、回到 C5），可以多选一起改；参数锁目前只显示和清除，编辑放到第三步。
+  - 撤销只管网页上的修改（最多 200 步）。网格获得焦点时：方向键移动，Shift+方向键扩选，Enter 开关，Delete 关闭，⌘C/⌘V 复制粘贴步，⌘A 选中整页；Space、数字键等其他键仍然给面板。
+- Chromium 测试（`/tmp` 里的 Playwright 脚本，1440、1280、900 宽，中英文）：点击、拖动、撤销/重做、菜单填充、lane 画力度和微移、检查器、轨道长度、独奏、BPM/swing、播放头、播放中切换 pattern、切回后改动还在、刷新页面后从卡上读回，都正常，没有页面错误。

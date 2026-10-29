@@ -11,6 +11,8 @@ front panel.
 > "LXR" and "LXR-02" are trademarks of Erica Synths and are used here only to
 > say what the emulator is compatible with.
 
+![Sequencer editor playing a pattern](../docs/images/emu-sequencer.png)
+
 ![Virtual front panel running firmware 1.7](../docs/images/emu-panel.png)
 
 ## What it is
@@ -49,8 +51,37 @@ that only works on the device, see `docs/EMULATOR_PLAN.md`).
 ## Using it
 
 Click **Power on**. The page is in English, or in Chinese when that is your
-browser's first language; the button at the top right switches. The panel
-works like the device:
+browser's first language; the button at the top right switches.
+
+### Sequencer
+
+The editor at the top shows the playing pattern and edits the firmware's own
+pattern data, so the panel, the display and the SD card see the same thing.
+
+- **Grid:** click a step to switch it on or off, drag to paint along a track,
+  Shift-click or right-click to select steps without switching them. Brightness
+  is velocity; small marks show probability, retrig, parameter locks and nudge.
+  Each track has its own length (1–64) and playhead.
+- **Track header:** click the name to hear the voice, M/S to mute or solo
+  (⌘-click solos several), the length box, and **⋯** for fills (every beat,
+  every 8th, offbeats, every 16th), shifting, humanizing velocity, copy/paste and clear.
+- **Lane:** draw velocity, probability, retrig, nudge or note for the selected
+  track; double-click resets a step.
+- **Inspector:** everything about the selected steps; several steps can be
+  edited at once.
+- **Toolbar:** play/stop, BPM (type, scroll or tap), swing, pattern A1–D16,
+  save, undo/redo (⌘Z, ⇧⌘Z). The strip above the grid shows all 4 bars; click
+  one to show it, or let **Follow** track the playhead.
+- **Keep edits:** on the device, switching patterns throws away unsaved changes
+  to the playing pattern. With **Keep edits** on (the default), the emulator
+  keeps them and saves the pattern file when the pattern changes; with it off,
+  it behaves like the device. **Save** (⌘S) does what SAVE does on the device.
+- **Keys with the grid focused:** arrows move, Shift+arrows extend, Enter switches,
+  Delete clears, ⌘C/⌘V copy and paste steps, ⌘A selects the bar.
+
+### Panel
+
+The virtual panel below works like the device:
 
 - **Pots 1-4, DATA encoder:** drag up/down or use the mouse wheel. The DATA cap is the encoder's push button.
 - **Buttons:** pressed while held. Click SHIFT to latch it, click again to release.
@@ -83,7 +114,7 @@ with the card. Export, import and export again gives byte-identical files.
 Not yet tried with a real LXR-02: please report if the device doesn't load an
 exported card.
 
-Not there yet: output 2, MIDI, a parameter/step editor.
+Not there yet: output 2, MIDI, a sound editor, editing parameter locks.
 
 ## Building
 
@@ -115,7 +146,8 @@ npm run dev     # or: npm run build
 - `emu/platform.c` boot sequence and main loop of `main.c`, interrupts on the sample clock
 - `emu/api.c`, `emu/lxr_api.h` C API, exported to JavaScript
 - `emu/cli/` command line tool
-- `web/` the page: `public/lxr-processor.js` (AudioWorklet), `src/` (panel, display, SD card storage)
+- `emu/seq_api.c` pattern data for the sequencer editor
+- `web/` the page: `public/lxr-processor.js` (AudioWorklet), `src/` (panel, display, SD card storage), `src/seq/` (sequencer editor)
 - `docs/EMULATOR_PLAN.md` design notes and findings (in Chinese)
 
 ## License
