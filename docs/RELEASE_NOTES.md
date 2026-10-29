@@ -12,6 +12,57 @@ at the bottom of the page.
 
 ## English
 
+### 0.2.1 – 2026-10-29
+
+Fixes for the freezes reported after 0.2.0, and a reset button for sounds.
+
+#### Fixes
+
+- **The emulator froze after playing for a while and then pressing stop.** The sound stopped, the
+  display stopped, and reloading the page could hang or crash the browser. The same bug caused the
+  other freezes reported:
+  - switching voices after editing for a while;
+  - the first click after the page had been left alone, or after the computer slept.
+- **The cause:**
+  - After 2 minutes without a key or knob on the device, the firmware shows its screensaver.
+  - The next key press then waits in the firmware for the screensaver's next step, up to half a
+    second. On the device, time goes on during this wait.
+  - In the emulator, time only moved between the firmware's main loop passes, so the wait never
+    ended, and the browser's audio thread was stuck in it.
+  - Playing and editing on the page don't count as keys for the firmware. So this happened after 2
+    minutes of playing, or of editing on the page only.
+- **The fix:**
+  - Time now goes on during such waits, as on the device. Sound and sequencer keep running.
+  - The key takes effect when the wait is over. Right after the screensaver this takes up to half a
+    second, as on the device.
+  - The 0.2.0 notes put the freeze after idle down to a timing problem in the browser. It was this
+    bug. The safeguards added in 0.2.0 (the watchdog and the error messages) stay.
+- **A reboot while playing lost the latest pattern edits, so it was silent after the reboot.** The
+  firmware saves the pattern only once the sequencer stops. The current pattern and kit are now
+  saved first when you:
+  - reboot;
+  - put the page in the background;
+  - leave it until the automatic pause;
+  - export the card.
+- **After a reboot, removing a solo muted every track.** The page still showed the solo from before
+  the reboot. A reboot now clears the solo, as it clears the device's mutes. A solo is also dropped
+  when the mutes are changed elsewhere, for example on the panel.
+- **Step velocity seemed to do nothing.** In the init kit, "Velocity → volume" is off and velocity
+  modulates nothing, so velocity is not heard. The device does the same. The velocity lane now says
+  so for the selected track, with a button that turns "Velocity → volume" on.
+
+#### New
+
+- **Reset sound** (↺ at the top of the sound panel) puts the selected voice back to the init sound
+  of a new project, on all 8 pages. Other voices and the pattern stay as they are. It asks first.
+  - **Reboot** restarts the emulator from the card.
+  - **Erase SD card** starts again from an empty card.
+
+#### Upgrading
+
+Reload the page (⌘⇧R if the old one still shows). The bottom of the page should say "Version
+0.2.1". The virtual SD card is kept.
+
 ### 0.2.0 – 2026-10-29
 
 A sequencer and a sound editor above the virtual panel, made for a desktop browser.
@@ -137,6 +188,42 @@ First public version.
 ---
 
 ## 中文
+
+### 0.2.1 – 2026-10-29
+
+修复 0.2.0 之后报告的死机问题，并新增音色的重置按钮。
+
+#### 修复
+
+- **播放一段时间后按停止，模拟器死机。** 声音停了，屏幕也不动了；重新载入页面时，浏览器可能卡住或崩溃。之前报告的其他死机也是这个问题：
+  - 编辑一段时间后切换音色；
+  - 页面放着不用，或者电脑休眠之后，第一次点击。
+- **原因：**
+  - 设备上 2 分钟没有按键或旋钮操作，固件就进入屏保。
+  - 之后第一次按键时，固件要先等屏保走到下一步，最多半秒。真机上等待期间时间照常在走。
+  - 模拟器的时间只在固件的两次主循环之间前进，所以这个等待永远结束不了，浏览器的音频线程就卡在里面。
+  - 播放和在网页上编辑，对固件来说都不算按键。所以播放 2 分钟以上，或者只在网页上编辑 2 分钟以上，就会出现。
+- **修复：**
+  - 现在这种等待期间时间也会前进，和真机一样，声音和音序器照常运行。
+  - 等待结束后按键才生效。屏保之后最多要等半秒，真机也一样。
+  - 0.2.0 的说明里把"放久了会死"归因于浏览器重启音频的时序问题，这个判断不对，实际是这个 bug。0.2.0 加的保护（看门狗、错误提示）保留。
+- **播放中重启，最新的 pattern 修改丢了，重启后没有声音。** 固件要等音序器停下来才存 pattern。现在下面这些情况会先存好当前的 pattern 和 kit：
+  - 重启；
+  - 页面切到后台；
+  - 放着不用，到了自动暂停；
+  - 导出 SD 卡。
+- **重启后取消 solo，所有轨道都静音了。** 页面上还显示着重启前的 solo。现在重启时会清掉 solo，就像重启会清掉设备的静音一样。静音在别处被改动时（例如在面板上），solo 也会取消。
+- **步进的力度好像没有作用。** init kit 里"力度 → 音量"是关着的，力度也不调制任何参数，所以听不出力度的区别，真机也是这样。现在力度 lane 会针对选中的轨道提示这一点，并提供一个按钮，直接打开"力度 → 音量"。
+
+#### 新功能
+
+- **重置音色**（音色面板顶部的 ↺）：把选中音色 8 个页面上的设置都恢复成新项目的初始音色。其他音色和 pattern 不变。操作前会先确认。
+  - **重启**：从 SD 卡重新开机。
+  - **清空 SD 卡**：从一张空卡重新开始。
+
+#### 如何升级
+
+刷新页面即可（如果还是旧页面，按 ⌘⇧R）。页面底部应显示"版本 0.2.1"。浏览器里的虚拟 SD 卡会保留。
 
 ### 0.2.0 – 2026-10-29
 

@@ -1,7 +1,7 @@
 {
   "name": "lxr02-emu-web",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "LXR-02 Emu (unofficial): the LXR-02 firmware in the browser",
   "license": "GPL-3.0-only",
   "type": "module",
