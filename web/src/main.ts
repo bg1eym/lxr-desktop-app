@@ -156,7 +156,7 @@ const overlay = h('div', 'overlay',
     startBtn));
 
 const version = Object.assign(h('a', 'version'), { href: NOTES_URL });
-onLang(() => { version.textContent = t('version', { v: __APP_VERSION__ }); });
+onLang(() => { version.textContent = t('version', { v: `${__APP_VERSION__} · ${__APP_BUILD__}` }); });
 
 document.querySelector('#app')!.append(
   h('header', 'bar',
@@ -191,6 +191,11 @@ emu.onState = (s: PanelState) => {
 };
 emu.onSeq = (d, ack) => seq.setData(d, ack);
 emu.onParams = (v, ack) => sound.setParams(v, ack);
+emu.onCrash = (msg) => {
+  crashed = true;
+  setStatus('statusCrashed', { msg: msg.split('\n')[0] });
+  rebootBtn.disabled = false;
+};
 emu.onLoad = (l) => { load.textContent = `DSP ≈ ${(l * 100).toFixed(1)}%`; };
 emu.onCard = (bytes, persistent) => {
   const mb = (bytes / 1048576).toFixed(1);
@@ -207,8 +212,13 @@ async function power(how: 'start' | 'reboot' | 'erase') {
   cardBtn.disabled = true;
   setStatus('statusStarting');
   try {
-    const { bootMs } = how === 'start' ? await emu.start() : how === 'reboot' ? await emu.reboot() : await emu.eraseCardAndReboot();
+    // a stuck audio context needs a new one; a reboot on it would stay silent
+    const stuck = stalled() || (emu.booted && emu.audioState !== 'running');
+    const { bootMs } = how === 'start' ? await emu.start()
+      : how === 'reboot' ? await (stuck ? emu.restartAudio() : emu.reboot())
+      : await emu.eraseCardAndReboot();
     lastBoot = { rate: emu.sampleRate, ms: bootMs };
+    crashed = false;
     setStatus('statusRunning', lastBoot);
     emu.onCard(emu.card.size, emu.card.persistent);
     overlay.hidden = true;
@@ -239,13 +249,13 @@ const sdDialog = cardDialog(emu, (bootMs) => {
 document.body.append(sdDialog);
 cardBtn.addEventListener('click', () => sdDialog.showModal());
 
-/* Power saving, and the computer going to sleep. With nothing playing, the
- * emulator pauses after 10 minutes without input, or after 5 minutes in the
- * background, so that it is not running when the computer sleeps; a click
- * or a key goes on where it was (the device's time follows the rendered
- * samples). When the browser stopped the audio by itself, for example while
- * the computer slept, the same brings it back. Leaving the page also hands
- * over what the firmware wrote to the card since the last sync. */
+/* Power saving. With nothing playing, the emulated device pauses after 10
+ * minutes without input, or after 5 minutes in the background: the worklet
+ * plays silence instead of running the firmware, and the browser's audio
+ * keeps going (suspending and resuming it left the worklet dead once). A
+ * click or a key goes on where it was; the device's time follows the
+ * rendered samples. Leaving the page also hands over what the firmware wrote
+ * to the card since the last sync. */
 const IDLE_PAUSE_MS = 10 * 60 * 1000;
 const HIDDEN_PAUSE_MS = 5 * 60 * 1000;
 let lastInput = performance.now();
@@ -256,7 +266,7 @@ let lastBoot: Record<string, number> = {};
 function wake() {
   lastInput = performance.now();
   emu.resume().then(() => {
-    if (autoPaused && emu.running) {
+    if (autoPaused && !emu.paused) {
       autoPaused = false;
       setStatus('statusRunning', lastBoot);
     }
@@ -264,7 +274,7 @@ function wake() {
 }
 for (const type of ['pointerdown', 'keydown', 'wheel']) window.addEventListener(type, wake, { capture: true, passive: true });
 setInterval(() => {
-  if (!emu.running || playing) return;
+  if (!emu.running || emu.paused || playing) return;
   const now = performance.now();
   const hiddenLong = document.visibilityState === 'hidden' && now - hiddenSince > HIDDEN_PAUSE_MS;
   if (!hiddenLong && now - lastInput < IDLE_PAUSE_MS) return;
@@ -280,6 +290,44 @@ document.addEventListener('visibilitychange', () => {
     wake();
   }
 });
+
+/* Watchdog: while the page is shown, the worklet reports at least every 3
+ * seconds (paused or not). When it goes quiet (stuck audio after the computer
+ * slept, a resume that never took, a worklet that stopped), first try to start
+ * the browser's audio again, then make a new audio context and reboot from
+ * the card, instead of leaving a dead page. It counts ticks without news
+ * rather than comparing clocks, which jump when the computer wakes up. */
+const TICK_MS = 5000;
+let crashed = false;
+let restarting = false;
+let quietTicks = 0;
+let lastHeard = -1;
+let resumeTried = false;
+let restarts: number[] = [];
+const stalled = () => quietTicks >= 2;
+setInterval(async () => {
+  if (restarting || crashed || !emu.booted || document.visibilityState !== 'visible') { quietTicks = 0; lastHeard = -1; return; }
+  if (emu.heard !== lastHeard) { lastHeard = emu.heard; quietTicks = 0; resumeTried = false; return; }
+  quietTicks++;
+  if (quietTicks === 2 && emu.audioState !== 'running' && !resumeTried) { resumeTried = true; emu.resume(); return; }
+  if (quietTicks < 4) return;
+  const now = performance.now();
+  restarts = restarts.filter((t) => now - t < 5 * 60 * 1000);
+  if (restarts.length >= 2) { setStatus('statusStalled'); return; }
+  restarts.push(now);
+  restarting = true;
+  console.warn('[lxr] audio stalled, restarting');
+  try {
+    const { bootMs } = await emu.restartAudio();
+    lastBoot = { rate: emu.sampleRate, ms: bootMs };
+    autoPaused = false;
+    setStatus('statusRestarted');
+  } catch (err) {
+    setStatus('statusError', { msg: (err as Error).message });
+  }
+  quietTicks = 0;
+  restarting = false;
+}, TICK_MS);
 
 /* ---- keyboard ------------------------------------------------------------- */
 const keyButtons: Record<string, number> = {

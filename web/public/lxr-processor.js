@@ -13,6 +13,7 @@ const QUANTUM = 128;
 const STATE_EVERY = 4;          /* quanta between state messages, ~86 Hz */
 const SD_EVERY = 172;           /* quanta between SD card syncs, ~0.5 s */
 const SEQ_EVERY = 8;            /* quanta between sequencer data checks, ~23 ms */
+const ACK_TIMEOUT = 690;        /* quanta (~2 s) to wait for the page's ack before sending anyway */
 
 /* The module only needs fd_write (printf to stdout/stderr), fd_seek and
  * fd_close from WASI. AudioWorkletGlobalScope has no TextDecoder, the text
@@ -62,12 +63,18 @@ class LxrProcessor extends AudioWorkletProcessor {
 		 * thread keeps running; without this, hours of display updates
 		 * would queue up and arrive at once. What changed in between is sent
 		 * when the page answers: the newest display state, pattern data and
-		 * parameters, and the card chunks, which stay marked as written. */
-		this.busy = { state: false, seq: false, params: false, sd: false, load: false };
+		 * parameters, and the card chunks, which stay marked as written.
+		 * Without an answer for 2 s it sends anyway (a page that does not
+		 * answer at all then gets one message of each kind every 2 s). */
+		this.busy = { state: 0, seq: 0, params: 0, sd: 0, load: 0 };   /* quantum of the send + 1, 0 = answered */
 		this.forceSeq = false;
 		this.forceParams = false;
+		this.dead = false;       /* the firmware failed: stop calling it */
+		this.idle = false;       /* paused by the page: the device's time stands still */
+		this.idleQuanta = 0;
 		this.port.onmessage = (e) => {
-			if (this.x) this.handle(e.data); else this.pending.push(e.data);
+			if (this.dead) return;
+			if (this.x) this.safely(() => this.handle(e.data)); else this.pending.push(e.data);
 		};
 
 		/* sdChunks: the saved card, [chunk index, ArrayBuffer] pairs.
@@ -97,10 +104,28 @@ class LxrProcessor extends AudioWorkletProcessor {
 			}
 			this.x = x;
 			this.bufPtr = x.lxr_audio_buffer();
-			for (const m of this.pending) this.handle(m);
+			for (const m of this.pending) this.safely(() => this.handle(m));
 			this.pending = [];
 			this.port.postMessage({ t: 'ready', res, bootMs: Date.now() - t0, skipped });
 		}).catch((err) => this.port.postMessage({ t: 'error', msg: String(err && err.stack || err) }));
+	}
+
+	waiting(kind) {
+		const sent = this.busy[kind];
+		return sent !== 0 && this.quanta + 1 - sent < ACK_TIMEOUT;
+	}
+
+	/* An exception from the firmware (a WebAssembly trap) would otherwise
+	 * stop this processor silently: no sound, a frozen display. Report it
+	 * and play silence; the page offers a reboot. */
+	safely(f) {
+		try { f(); } catch (err) { this.fail(err); }
+	}
+
+	fail(err) {
+		if (this.dead) return;
+		this.dead = true;
+		this.port.postMessage({ t: 'crash', msg: String((err && err.stack) || err) });
 	}
 
 	handle(m) {
@@ -129,8 +154,9 @@ class LxrProcessor extends AudioWorkletProcessor {
 		}
 		case 'midi': for (const b of m.data) x.lxr_midi_in_byte(b); break;
 		case 'syncSd': this.syncSd(m.id); break;
+		case 'idle': this.idle = !!m.on; this.idleQuanta = 0; break;
 		case 'ack':
-			this.busy[m.k] = false;
+			this.busy[m.k] = 0;
 			if (m.k === 'state') this.postState();
 			else if (m.k === 'seq') this.checkSeq();
 			else if (m.k === 'params') this.checkParams();
@@ -198,7 +224,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 	 * stores them. With an id, always answer, so the page knows it has
 	 * everything (before a reboot). */
 	syncSd(id) {
-		if (id === undefined && this.busy.sd) return;
+		if (id === undefined && this.waiting('sd')) return;
 		const x = this.x;
 		const size = x.lxr_sd_chunk_size();
 		const chunks = [];
@@ -206,7 +232,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 			chunks.push([c, new Uint8Array(x.memory.buffer, x.lxr_sd_chunk(c), size).slice().buffer]);
 		}
 		if (chunks.length || id !== undefined) {
-			this.busy.sd = true;
+			this.busy.sd = this.quanta + 1;
 			this.port.postMessage({ t: 'sd', id, chunks }, chunks.map((c) => c[1]));
 		}
 	}
@@ -231,7 +257,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 	 * kit load or the page. */
 	checkParams(force) {
 		if (force) this.forceParams = true;
-		if (this.busy.params) return;
+		if (this.waiting('params')) return;
 		const x = this.x;
 		const n = x.lxr_num_params();
 		const v = new Uint8Array(x.memory.buffer, x.lxr_params(), n);
@@ -244,7 +270,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.lastParams = v.slice();
 		const out = v.slice();
 		this.forceParams = false;
-		this.busy.params = true;
+		this.busy.params = this.quanta + 1;
 		this.port.postMessage({ t: 'params', v: out, ack: this.paramAck }, [out.buffer]);
 	}
 
@@ -252,7 +278,7 @@ class LxrProcessor extends AudioWorkletProcessor {
 	 * virtual panel or MIDI all end up here). */
 	checkSeq(force) {
 		if (force) this.forceSeq = true;
-		if (this.busy.seq) return;
+		if (this.waiting('seq')) return;
 		const x = this.x;
 		const size = x.lxr_seq_snapshot_size();
 		const snap = new Uint8Array(x.memory.buffer, x.lxr_seq_snapshot(this.seqView), size);
@@ -266,12 +292,12 @@ class LxrProcessor extends AudioWorkletProcessor {
 		this.lastSeq = copy;
 		const out = copy.slice();
 		this.forceSeq = false;
-		this.busy.seq = true;
+		this.busy.seq = this.quanta + 1;
 		this.port.postMessage({ t: 'seq', data: out, ack: this.seqAck }, [out.buffer]);
 	}
 
 	postState() {
-		if (this.busy.state) return;
+		if (this.waiting('state')) return;
 		const x = this.x;
 		const mem = x.memory.buffer;
 		const lcdBytes = new Uint8Array(mem, x.lxr_get_lcd(), 32);
@@ -288,16 +314,39 @@ class LxrProcessor extends AudioWorkletProcessor {
 		if (lcd === l.lcd && cg === l.cg && st === l.st && lo === l.lo && hi === l.hi && run === l.run && heads === l.heads) return;
 		this.last = { lcd, cg, st, lo, hi, run, heads };
 		const playheads = Array.from(heads, (c) => c.charCodeAt(0) - 32);
-		this.busy.state = true;
+		this.busy.state = this.quanta + 1;
 		this.port.postMessage({ t: 'state', lcd: lcdBytes.slice(), cg: cgBytes.slice(), st, lo, hi, run, playheads });
 	}
 
 	process(inputs, outputs) {
 		const out = outputs[0];
-		if (!this.x) {
+		if (!this.x || this.dead) {
 			for (const ch of out) ch.fill(0);
 			return true;
 		}
+		if (this.idle) {
+			/* Paused without stopping the browser's audio (suspending and
+			 * resuming the AudioContext proved unreliable): silence, no calls
+			 * into the firmware, only a heartbeat for the page's watchdog. */
+			for (const ch of out) ch.fill(0);
+			this.quanta++;
+			if (++this.idleQuanta >= 1034 && !this.waiting('load')) {
+				this.idleQuanta = 0;
+				this.busy.load = this.quanta + 1;
+				this.port.postMessage({ t: 'load', load: 0, idle: true });
+			}
+			return true;
+		}
+		try {
+			this.render(out);
+		} catch (err) {
+			this.fail(err);
+			for (const ch of out) ch.fill(0);
+		}
+		return true;
+	}
+
+	render(out) {
 		const t0 = Date.now();
 		this.x.lxr_render(this.bufPtr, QUANTUM, 4);
 		const buf = new Float32Array(this.x.memory.buffer, this.bufPtr, QUANTUM * 4);
@@ -319,14 +368,13 @@ class LxrProcessor extends AudioWorkletProcessor {
 		if (this.quanta % SEQ_EVERY === 4) this.checkParams();
 		if (this.renderQuanta >= 1034) {   /* about every 3 s: Date.now() only has 1 ms steps */
 			const audioMs = this.renderQuanta * QUANTUM / sampleRate * 1000;
-			if (!this.busy.load) {
-				this.busy.load = true;
+			if (!this.waiting('load')) {
+				this.busy.load = this.quanta + 1;
 				this.port.postMessage({ t: 'load', load: this.renderMs / audioMs });
 			}
 			this.renderMs = 0;
 			this.renderQuanta = 0;
 		}
-		return true;
 	}
 }
 

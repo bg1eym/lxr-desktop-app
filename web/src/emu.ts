@@ -33,7 +33,8 @@ type Msg =
   | { t: 'seqView'; pattern: number }
   | ({ t: 'seq'; id: number } & SeqEdit)
   | { t: 'trigger'; voice: number; velocity: number }
-  | { t: 'ack'; k: string };
+  | { t: 'ack'; k: string }
+  | { t: 'idle'; on: boolean };
 
 /** Changes to the pattern data, done in this order. */
 export interface SeqEdit {
@@ -68,6 +69,8 @@ export class LxrEmu {
   onState: (s: PanelState) => void = () => {};
   onLoad: (load: number) => void = () => {};
   onLog: (line: string) => void = (s) => console.log('[lxr]', s);
+  /** The firmware stopped with an error after booting; reboot() starts it again. */
+  onCrash: (msg: string) => void = () => {};
   /** Pattern data of the shown pattern, whenever it changes. ack: the id of
    * the last seqEdit() it includes. */
   onSeq: (data: SeqData, ack: number) => void = () => {};
@@ -90,6 +93,7 @@ export class LxrEmu {
   private syncWaiters = new Map<number, () => void>();
   private exportWaiters = new Map<number, (m: { files?: [string, boolean, ArrayBuffer | null][]; error?: string }) => void>();
   private cardLoaded = false;
+  private messages = 0;            // from the worklet, for the page's watchdog
 
   /** Start audio and boot the device. Call from a user gesture. */
   async start(): Promise<{ bootMs: number }> {
@@ -97,10 +101,10 @@ export class LxrEmu {
       // The device renders 44140.625 Hz worth of samples per second of its
       // own time; 44100 is the closest rate a sound card offers.
       this.ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
-      await this.ctx.audioWorklet.addModule(`${BASE}lxr-processor.js`);
+      await this.ctx.audioWorklet.addModule(`${BASE}lxr-processor.js?v=${__APP_BUILD__}`);
     }
     if (!this.wasm) {
-      const res = await fetch(`${BASE}lxr_emu.wasm`);
+      const res = await fetch(`${BASE}lxr_emu.wasm?v=${__APP_BUILD__}`);
       if (!res.ok) throw new Error(`lxr_emu.wasm: HTTP ${res.status}`);
       this.wasm = await res.arrayBuffer();
     }
@@ -164,19 +168,57 @@ export class LxrEmu {
     });
   }
 
-  /** Stop the audio clock, which pauses the emulated device; resume() goes on
-   * where it was (the device's time follows the rendered samples). */
+  private idle = false;
+
+  /** Pause the emulated device: the worklet plays silence and stops running
+   * the firmware, while the browser's audio keeps going (suspending and
+   * resuming the AudioContext left the worklet dead once). resume() goes on
+   * where it was; the device's time follows the rendered samples. */
   async pause(): Promise<void> {
-    if (!this.ctx || this.ctx.state !== 'running') return;
+    if (!this.node || this.idle) return;
     await this.syncCard();
-    await this.ctx.suspend();
+    this.idle = true;
+    this.send({ t: 'idle', on: true });
   }
 
-  /** Start the audio clock again, after pause() or when the browser stopped
-   * it (for example while the computer slept). */
+  get paused(): boolean {
+    return this.idle;
+  }
+
+  /** Go on after pause(), and start the browser's audio again when it was
+   * stopped by the browser (for example while the computer slept). */
   async resume(): Promise<void> {
-    if (!this.ctx || !this.node || this.ctx.state === 'running' || this.ctx.state === 'closed') return;
+    if (!this.ctx || !this.node || this.ctx.state === 'closed') return;
+    if (this.idle) {
+      this.idle = false;
+      this.send({ t: 'idle', on: false });
+    }
+    if (this.ctx.state === 'running') return;
     try { await this.ctx.resume(); } catch { /* needs a click on the page; tried again then */ }
+  }
+
+  get audioState(): string {
+    return this.ctx?.state ?? 'none';
+  }
+
+  /** Messages heard from the worklet so far; it reports at least every 3
+   * seconds while booted, paused or not. */
+  get heard(): number {
+    return this.messages;
+  }
+
+  get booted(): boolean {
+    return !!this.node;
+  }
+
+  /** A new audio context and a reboot from the saved card, for when the
+   * browser's audio got stuck (for example after the computer slept). */
+  async restartAudio(): Promise<{ bootMs: number }> {
+    this.stop();
+    const old = this.ctx;
+    this.ctx = null;
+    if (old) await Promise.race([old.close().catch(() => {}), new Promise((r) => setTimeout(r, 1000))]);
+    return this.start();
   }
 
   get sampleRate(): number {
@@ -214,10 +256,13 @@ export class LxrEmu {
       },
     });
     node.connect(this.ctx.destination);
+    node.onprocessorerror = () => this.onCrash('AudioWorklet processor error');
     this.node = node;
+    this.idle = false;
     return new Promise((resolve, reject) => {
       node.port.onmessage = (e: MessageEvent) => {
         const m = e.data;
+        this.messages++;
         // flow control: the worklet sends the next one of these when it hears back
         if (m.t === 'state' || m.t === 'seq' || m.t === 'params' || m.t === 'sd' || m.t === 'load') {
           node.port.postMessage({ t: 'ack', k: m.t });
@@ -229,6 +274,7 @@ export class LxrEmu {
             resolve({ bootMs: m.bootMs, skipped: m.skipped ?? [] });
             break;
           case 'error': reject(new Error(m.msg)); break;
+          case 'crash': console.error('[lxr] firmware stopped:', m.msg); this.onCrash(m.msg); break;
           case 'state': this.onState(m as PanelState); break;
           case 'seq': this.onSeq(parseSnapshot(m.data), m.ack); break;
           case 'params': this.onParams(m.v, m.ack); break;
